@@ -590,7 +590,7 @@ export default function FinanceApp() {
             const percent = (b.spent / b.limit) * 100;
             const isOver = b.spent > b.limit;
             const isNearLimit = percent > 85 && !isOver;
-            const overAmount = b.spent - b.limit;
+            //const overAmount = b.spent - b.limit;
             const isEditing = editingId === b.id;
 
             let statusColor = "bg-green-500";
