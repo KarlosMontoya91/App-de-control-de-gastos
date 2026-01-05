@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, ComposedChart, Area
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, ComposedChart, Area
 } from 'recharts';
 import { 
-  Wallet, Plus, Home, PieChart as PieIcon, 
-  Settings, ArrowRight, ArrowUpRight, ArrowDownLeft, 
-  CreditCard, Bell, Check, User, Calendar, Info, AlertCircle, Camera,
-  AlertTriangle, Pencil, X, Save, Cloud, Loader2, HardDrive, Target, PiggyBank, Zap, Trash2, History, TrendingUp, Filter, BarChart3
+  Wallet, Plus, Home, PieChart as
+  Settings, ArrowRight, ArrowUpRight, ArrowDownLeft, Check, User, Calendar, Info, AlertCircle, Camera,
+  AlertTriangle, Pencil, X, Save, HardDrive, Target, PiggyBank, Zap, Trash2, History, TrendingUp, BarChart3
 } from 'lucide-react';
 
 // --- TYPES & DATA MODEL ---
@@ -749,7 +748,7 @@ export default function FinanceApp() {
             const percent = (b.spent / b.limit) * 100;
             const isOver = b.spent > b.limit;
             const isNearLimit = percent > 85 && !isOver;
-            const overAmount = b.spent - b.limit;
+            // const overAmount = b.spent - b.limit;
             const isEditing = editingId === b.id;
 
             let statusColor = "bg-green-500";
