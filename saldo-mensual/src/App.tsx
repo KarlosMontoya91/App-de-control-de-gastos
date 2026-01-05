@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, ComposedChart, Area
 } from 'recharts';
-import {
-  Wallet, Plus, Home, PieChart as PieIcon,
-  Settings, ArrowRight, ArrowUpRight, ArrowDownLeft,
-  CreditCard, Bell, Check, User, Calendar, AlertCircle, Camera,
-  AlertTriangle, Pencil, X, Save
+import { 
+  Wallet, Plus, Home, PieChart as PieIcon, 
+  Settings, ArrowRight, ArrowUpRight, ArrowDownLeft, 
+  CreditCard, Bell, Check, User, Calendar, Info, AlertCircle, Camera,
+  AlertTriangle, Pencil, X, Save, Cloud, Loader2, HardDrive, Target, PiggyBank, Zap, Trash2, History, TrendingUp, Filter, BarChart3
 } from 'lucide-react';
 
 // --- TYPES & DATA MODEL ---
 
 type Frequency = 'quincenal' | 'mensual' | 'semanal';
 type TransactionType = 'expense' | 'income';
+type TimeFilter = 'week' | 'month' | 'year';
 
 interface Transaction {
   id: string;
@@ -23,13 +24,22 @@ interface Transaction {
   type: TransactionType;
 }
 
+interface RecurringHistoryItem {
+  month: string; // Formato YYYY-MM
+  spent: number;
+  limit: number;
+}
+
 interface RecurringExpense {
   id: string;
   name: string;
-  amount: number;
+  amount: number; // Tope / Presupuesto
+  spent: number;  // Acumulado actual
   category: string;
-  dayOfMonth: number;
-  isPaid?: boolean; // Track monthly payment status
+  dayOfMonth: number; // Día de corte/reinicio
+  isPaid?: boolean;
+  lastResetDate?: string; // Fecha del último reinicio de ciclo
+  history?: RecurringHistoryItem[]; // Historial de meses pasados
 }
 
 interface BudgetCategory {
@@ -46,6 +56,7 @@ interface SavingsGoal {
   targetAmount: number;
   currentAmount: number;
   deadline?: string;
+  icon?: string;
 }
 
 interface UserConfig {
@@ -74,13 +85,13 @@ const formatCurrency = (amount: number, currency = 'MXN') =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency }).format(amount);
 
 const DEFAULT_CATEGORIES = [
-  { name: 'Vivienda', color: '#60A5FA' }, // Blue
-  { name: 'Alimentos', color: '#34D399' }, // Emerald
-  { name: 'Transporte', color: '#F87171' }, // Red
-  { name: 'Entretenimiento', color: '#A78BFA' }, // Purple
-  { name: 'Servicios', color: '#FBBF24' }, // Amber
-  { name: 'Salud', color: '#F472B6' }, // Pink
-  { name: 'Otros', color: '#94A3B8' }, // Slate
+  { name: 'Vivienda', color: '#60A5FA' }, 
+  { name: 'Alimentos', color: '#34D399' }, 
+  { name: 'Transporte', color: '#F87171' }, 
+  { name: 'Entretenimiento', color: '#A78BFA' }, 
+  { name: 'Servicios', color: '#FBBF24' }, 
+  { name: 'Salud', color: '#F472B6' }, 
+  { name: 'Otros', color: '#94A3B8' }, 
 ];
 
 const COLORS = ['#60A5FA', '#34D399', '#F87171', '#A78BFA', '#FBBF24', '#F472B6', '#94A3B8', '#FB923C', '#A3E635'];
@@ -126,19 +137,24 @@ const Label = ({ children }: { children: React.ReactNode }) => (
   </label>
 );
 
-const ProgressBar = ({ value, max, colorOverride }: { value: number; max: number; colorOverride?: string }) => {
+const ProgressBar = ({ value, max, colorOverride, isGoal = false }: { value: number; max: number; colorOverride?: string; isGoal?: boolean }) => {
   const percentage = Math.min(100, Math.max(0, (value / max) * 100));
   
   let colorClass = "bg-green-500";
-  if (percentage > 100) colorClass = "bg-red-500"; 
-  else if (percentage > 85) colorClass = "bg-yellow-400"; 
-  
-  if (value > max) colorClass = "bg-red-500"; 
+  if (!colorOverride) {
+      if (isGoal) {
+          colorClass = percentage < 50 ? "bg-yellow-400" : "bg-green-500";
+      } else {
+          if (percentage > 100) colorClass = "bg-red-500"; 
+          else if (percentage > 85) colorClass = "bg-yellow-400"; 
+          if (value > max) colorClass = "bg-red-500";
+      }
+  }
 
   return (
-    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+    <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
       <div 
-        className={`h-full ${colorOverride || colorClass} transition-all duration-500 ease-out`} 
+        className={`h-full ${colorOverride || colorClass} transition-all duration-700 ease-out`} 
         style={{ width: `${percentage}%` }}
       />
     </div>
@@ -149,18 +165,21 @@ const ProgressBar = ({ value, max, colorOverride }: { value: number; max: number
 
 const SplashScreen = ({ onFinish }: { onFinish: () => void }) => {
   useEffect(() => {
-    const timer = setTimeout(onFinish, 2500);
+    const timer = setTimeout(onFinish, 4500);
     return () => clearTimeout(timer);
   }, [onFinish]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center animate-out fade-out duration-1000 delay-[1.5s] fill-mode-forwards pointer-events-none">
-       <div className="flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <div className="bg-yellow-400 p-4 rounded-2xl mb-4 shadow-[0_0_30px_rgba(250,204,21,0.3)]">
-             <Wallet size={48} className="text-slate-950" strokeWidth={2.5} />
+    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center animate-out fade-out duration-1000 delay-[3.5s] fill-mode-forwards pointer-events-none">
+       <div className="flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-1000">
+          <div className="bg-yellow-400 p-5 rounded-3xl mb-6 shadow-[0_0_50px_rgba(250,204,21,0.4)] animate-bounce-slow">
+             <Wallet size={64} className="text-slate-950" strokeWidth={2} />
           </div>
-          <h1 className="text-4xl font-bold text-white tracking-tighter">Saldo<span className="text-yellow-400">Mensual2</span></h1>
-          <p className="text-slate-500 mt-2 text-sm tracking-widest uppercase">Tu control financiero</p>
+          <h1 className="text-5xl font-bold text-white tracking-tighter mb-2">Saldo<span className="text-yellow-400">Mensual</span></h1>
+          <p className="text-slate-400 text-sm tracking-[0.3em] uppercase opacity-80">Control Inteligente</p>
+       </div>
+       <div className="absolute bottom-10 text-slate-600 text-xs">
+          Cargando tus finanzas...
        </div>
     </div>
   );
@@ -171,24 +190,89 @@ const SplashScreen = ({ onFinish }: { onFinish: () => void }) => {
 export default function FinanceApp() {
   const [users, setUsers] = useState<{[id: string]: UserProfile}>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [view, setView] = useState<'onboarding' | 'dashboard' | 'budget' | 'recurring' | 'alerts' | 'reports' | 'settings'>('dashboard');
+  const [view, setView] = useState<'onboarding' | 'dashboard' | 'budget' | 'recurring' | 'alerts' | 'reports' | 'settings' | 'goals'>('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
 
-  useEffect(() => {
-    document.title = "SaldoMensual2026";
-  }, []);
-
-  // New State for Modals
+  // Modals
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isRecurringModalOpen, setIsRecurringModalOpen] = useState(false);
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  
+  // Edit Recurring Modal
+  const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null);
+  const [historyRecurring, setHistoryRecurring] = useState<RecurringExpense | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
-  // Persistence Load
+  // Edit Goal Modal
+  const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
+  const [isConfirmingDeleteGoal, setIsConfirmingDeleteGoal] = useState(false);
+
+  // Partial Payment Modal State
+  const [payRecurringId, setPayRecurringId] = useState<string | null>(null);
+  const [payRecurringAmount, setPayRecurringAmount] = useState('');
+
+  // Add Money to Goal Modal State
+  const [goalDepositId, setGoalDepositId] = useState<string | null>(null);
+  const [goalDepositAmount, setGoalDepositAmount] = useState('');
+
+  // General Chart State
+  const [generalChartFilter, setGeneralChartFilter] = useState<TimeFilter>('month');
+
+  // Helper to check for recurring resets
+  const checkRecurringResets = (profile: UserProfile): UserProfile => {
+    const today = new Date();
+    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    
+    const updatedRecurring = profile.recurring.map(r => {
+      const lastReset = r.lastResetDate || '';
+      let shouldReset = false;
+      
+      if (!lastReset) {
+         return { ...r, lastResetDate: currentMonthStr };
+      }
+
+      if (lastReset !== currentMonthStr) {
+          if (today.getDate() >= r.dayOfMonth) {
+              shouldReset = true;
+          }
+      }
+
+      if (shouldReset) {
+          const historyItem: RecurringHistoryItem = {
+              month: lastReset, 
+              spent: r.spent,
+              limit: r.amount
+          };
+          const newHistory = [...(r.history || []), historyItem];
+          
+          return {
+              ...r,
+              spent: 0,
+              isPaid: false,
+              lastResetDate: currentMonthStr, 
+              history: newHistory
+          };
+      }
+      return r;
+    });
+
+    return { ...profile, recurring: updatedRecurring };
+  };
+
+  // Persistence Load (LOCAL DATABASE)
   useEffect(() => {
-    const savedData = localStorage.getItem('finflow_2026_db');
+    const savedData = localStorage.getItem('saldomensual_db_v2'); 
     if (savedData) {
       const parsed = JSON.parse(savedData);
-      setUsers(parsed.users || {});
+      let loadedUsers = parsed.users || {};
+      
+      const currentId = parsed.currentUserId;
+      if (currentId && loadedUsers[currentId]) {
+          loadedUsers[currentId] = checkRecurringResets(loadedUsers[currentId]);
+      }
+
+      setUsers(loadedUsers);
       setCurrentUserId(parsed.currentUserId || null);
     } else {
       const newId = generateId();
@@ -208,7 +292,7 @@ export default function FinanceApp() {
   // Persistence Save
   useEffect(() => {
     if (currentUserId) {
-      localStorage.setItem('finflow_2026_db', JSON.stringify({ users, currentUserId }));
+      localStorage.setItem('saldomensual_db_v2', JSON.stringify({ users, currentUserId }));
     }
   }, [users, currentUserId]);
 
@@ -217,7 +301,7 @@ export default function FinanceApp() {
   useEffect(() => {
     if (userData && !userData.config.hasCompletedOnboarding) {
       setView('onboarding');
-      setShowSplash(false); // Skip splash for onboarding
+      setShowSplash(false);
     }
   }, [userData]);
 
@@ -243,26 +327,77 @@ export default function FinanceApp() {
       );
     }
 
-    let updatedGoals = [...userData.goals];
-    if (t.type === 'expense' && t.category === 'Ahorro' && updatedGoals.length > 0) {
-       updatedGoals[0].currentAmount += t.amount;
-    }
-
     updateUser({ 
       transactions: updatedTransactions,
       budgets: updatedBudgets,
-      goals: updatedGoals
     });
     setView('dashboard');
     setIsModalOpen(false);
   };
 
-  const toggleRecurringPaid = (id: string) => {
+  const addRecurringPayment = (id: string, amount: number) => {
     if (!userData) return;
-    const updatedRecurring = userData.recurring.map(r => 
-      r.id === id ? { ...r, isPaid: !r.isPaid } : r
-    );
+    const updatedRecurring = userData.recurring.map(r => {
+      if (r.id === id) {
+          const newSpent = r.spent + amount;
+          return { ...r, spent: newSpent, isPaid: newSpent >= r.amount };
+      }
+      return r;
+    });
     updateUser({ recurring: updatedRecurring });
+    setPayRecurringId(null);
+    setPayRecurringAmount('');
+  };
+
+  const editRecurringExpense = (id: string, name: string, amount: number, day: number) => {
+    if (!userData) return;
+    const updatedRecurring = userData.recurring.map(r => {
+      if (r.id === id) {
+          return { ...r, name, amount, dayOfMonth: day, isPaid: r.spent >= amount };
+      }
+      return r;
+    });
+    updateUser({ recurring: updatedRecurring });
+    setEditingRecurring(null);
+  };
+
+  const deleteRecurringExpense = (id: string) => {
+    if (!userData) return;
+    const updatedRecurring = userData.recurring.filter(r => r.id !== id);
+    updateUser({ recurring: updatedRecurring });
+    setEditingRecurring(null);
+    setIsConfirmingDelete(false);
+  };
+
+  const editGoal = (id: string, name: string, target: number) => {
+    if (!userData) return;
+    const updatedGoals = userData.goals.map(g => {
+        if (g.id === id) return { ...g, name, targetAmount: target };
+        return g;
+    });
+    updateUser({ goals: updatedGoals });
+    setEditingGoal(null);
+  };
+
+  const deleteGoal = (id: string) => {
+    if (!userData) return;
+    const updatedGoals = userData.goals.filter(g => g.id !== id);
+    updateUser({ goals: updatedGoals });
+    setEditingGoal(null);
+    setIsConfirmingDeleteGoal(false);
+  };
+
+  const addGoalDeposit = (id: string, amount: number) => {
+    if (!userData) return;
+    const updatedGoals = userData.goals.map(g => {
+        if (g.id === id) {
+            return { ...g, currentAmount: g.currentAmount + amount };
+        }
+        return g;
+    });
+    updateUser({ goals: updatedGoals });
+    setGoalDepositId(null);
+    setGoalDepositAmount('');
   };
 
   const updateBudgetLimit = (id: string, newLimit: number) => {
@@ -275,7 +410,6 @@ export default function FinanceApp() {
 
   const addBudgetCategory = (name: string, limit: number) => {
     if (!userData) return;
-    // Pick a random color from palette
     const color = COLORS[userData.budgets.length % COLORS.length];
     const newBudget: BudgetCategory = {
       id: generateId(),
@@ -290,16 +424,34 @@ export default function FinanceApp() {
 
   const addRecurringExpense = (name: string, amount: number, day: number) => {
     if (!userData) return;
+    const today = new Date();
+    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    
     const newRecurring: RecurringExpense = {
       id: generateId(),
       name,
-      amount,
-      dayOfMonth: day,
+      amount, // Limit
+      spent: 0,
       category: 'Servicios',
-      isPaid: false
+      dayOfMonth: day,
+      isPaid: false,
+      lastResetDate: currentMonthStr,
+      history: []
     };
     updateUser({ recurring: [...userData.recurring, newRecurring] });
     setIsRecurringModalOpen(false);
+  };
+
+  const addGoal = (name: string, target: number) => {
+    if (!userData) return;
+    const newGoal: SavingsGoal = {
+        id: generateId(),
+        name,
+        targetAmount: target,
+        currentAmount: 0,
+    };
+    updateUser({ goals: [...userData.goals, newGoal] });
+    setIsGoalModalOpen(false);
   };
 
   // --- SUB-VIEWS ---
@@ -330,14 +482,19 @@ export default function FinanceApp() {
         color: cat.color
       }));
 
+      const today = new Date();
+      const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      
+      const initRecurring = (formData.recurring || []).map(r => ({ ...r, lastResetDate: currentMonthStr, history: [] }));
+
       updateUser({
         config: { 
           ...userData.config, 
           ...formData.config, 
           hasCompletedOnboarding: true, 
-          name: formData.config?.name || 'Karlos Montoya', 
+          name: formData.config?.name || 'Usuario', 
         },
-        recurring: formData.recurring || [],
+        recurring: initRecurring,
         budgets: initialBudgets,
         goals: [{ id: generateId(), name: 'Fondo de Emergencia', targetAmount: (formData.config?.monthlyIncome || 0) * 3, currentAmount: 0 }]
       });
@@ -348,7 +505,7 @@ export default function FinanceApp() {
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 animate-in fade-in duration-500">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center space-y-2">
-            <h1 className="text-3xl font-bold text-white tracking-tight">Saldo<span className="text-yellow-400">Mensual2</span></h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">Saldo<span className="text-yellow-400">Mensual</span></h1>
             <p className="text-slate-400">Configuración Inicial</p>
           </div>
           <Card className="p-6 space-y-6">
@@ -362,7 +519,7 @@ export default function FinanceApp() {
             )}
             {step === 2 && (
               <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">2. Gastos Fijos (Tarjetas/Servicios)</h2>
+                <h2 className="text-xl font-semibold text-white">2. Gastos Fijos (Estimados)</h2>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {formData.recurring?.map((r, idx) => (
                     <div key={idx} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-800">
@@ -373,7 +530,7 @@ export default function FinanceApp() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                    <Input id="rec-name" placeholder="Ej: Netflix" className="text-sm" />
-                   <Input id="rec-amount" type="number" placeholder="$0" className="text-sm" />
+                   <Input id="rec-amount" type="number" placeholder="$ Tope" className="text-sm" />
                 </div>
                 <Button variant="secondary" className="w-full py-2 text-sm" onClick={() => {
                    const name = (document.getElementById('rec-name') as HTMLInputElement).value;
@@ -381,7 +538,7 @@ export default function FinanceApp() {
                    if(name && amount) {
                      setFormData({
                        ...formData, 
-                       recurring: [...(formData.recurring || []), { id: generateId(), name, amount, category: 'Servicios', dayOfMonth: 1 }]
+                       recurring: [...(formData.recurring || []), { id: generateId(), name, amount, spent: 0, category: 'Servicios', dayOfMonth: 1 }]
                      });
                      (document.getElementById('rec-name') as HTMLInputElement).value = '';
                      (document.getElementById('rec-amount') as HTMLInputElement).value = '';
@@ -399,7 +556,7 @@ export default function FinanceApp() {
                         <span className="text-white font-medium">{formatCurrency(income)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
-                        <span className="text-slate-400">Gastos Fijos Total</span>
+                        <span className="text-slate-400">Gastos Fijos (Est.)</span>
                         <span className="text-red-400 font-medium">-{formatCurrency(recurringTotal)}</span>
                     </div>
                     <div className="flex justify-between items-center pt-1">
@@ -421,15 +578,11 @@ export default function FinanceApp() {
   const Dashboard = () => {
     if (!userData) return null;
     
-    // VARIABLES SPENT: Only transactions
     const variableSpent = userData.transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
     const totalIncome = userData.transactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const fixedSpent = userData.recurring.reduce((acc, r) => acc + r.spent, 0);
     
-    // LOGIC CHANGE: Only subtract PAID fixed expenses from the available balance
-    const paidFixedExpenses = userData.recurring.filter(r => r.isPaid).reduce((acc, r) => acc + r.amount, 0);
-    
-    // Formula: (Base Income + Extra Income) - (Paid Fixed) - (Variable Spent)
-    const currentBalance = (userData.config.monthlyIncome + totalIncome) - paidFixedExpenses - variableSpent;
+    const currentBalance = (userData.config.monthlyIncome + totalIncome) - fixedSpent - variableSpent;
 
     const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -464,10 +617,16 @@ export default function FinanceApp() {
              
              <div>
                <h1 className="text-xl font-bold text-white leading-tight">Hola, {userData.config.name}</h1>
-               <p className="text-slate-400 text-xs flex items-center gap-1">
-                 <Calendar size={10} />
-                 {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
-               </p>
+               <div className="flex items-center gap-2">
+                 <p className="text-slate-400 text-xs flex items-center gap-1">
+                   <Calendar size={10} />
+                   {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
+                 </p>
+                 <div className="flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
+                    <HardDrive size={10} className="text-yellow-400" />
+                    <span className="text-[9px] text-yellow-400 font-bold uppercase tracking-wider">Base Local</span>
+                 </div>
+               </div>
              </div>
           </div>
 
@@ -490,23 +649,23 @@ export default function FinanceApp() {
         <div className="grid grid-cols-2 gap-3">
              <Card onClick={() => setView('recurring')} className="p-4 flex flex-col justify-between h-28 hover:bg-slate-800 transition-colors cursor-pointer group">
                 <div className="bg-blue-500/10 w-fit p-2 rounded-lg text-blue-400 group-hover:bg-blue-500/20 mb-2">
-                   <CreditCard size={20} />
+                   <Zap size={20} />
                 </div>
                 <div>
                   <p className="text-white font-bold text-sm">Fijos</p>
                   <p className="text-slate-500 text-[10px] uppercase tracking-wide">
-                     {userData.recurring.filter(r => !r.isPaid).length} Pendientes
+                     Servicios, Recibos
                   </p>
                 </div>
              </Card>
 
-             <Card onClick={() => setView('alerts')} className="p-4 flex flex-col justify-between h-28 hover:bg-slate-800 transition-colors cursor-pointer group">
-                <div className="bg-red-500/10 w-fit p-2 rounded-lg text-red-400 group-hover:bg-red-500/20 mb-2">
-                   <Bell size={20} />
+             <Card onClick={() => setView('goals')} className="p-4 flex flex-col justify-between h-28 hover:bg-slate-800 transition-colors cursor-pointer group">
+                <div className="bg-green-500/10 w-fit p-2 rounded-lg text-green-400 group-hover:bg-green-500/20 mb-2">
+                   <Target size={20} />
                 </div>
                 <div>
-                  <p className="text-white font-bold text-sm">Alertas</p>
-                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Avisos</p>
+                  <p className="text-white font-bold text-sm">Metas</p>
+                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Ahorros</p>
                 </div>
              </Card>
 
@@ -516,17 +675,17 @@ export default function FinanceApp() {
                 </div>
                 <div>
                   <p className="text-white font-bold text-sm">Sobres</p>
-                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Presupuestos</p>
+                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Gastos Variables</p>
                 </div>
              </Card>
 
              <Card onClick={() => setView('reports')} className="p-4 flex flex-col justify-between h-28 hover:bg-slate-800 transition-colors cursor-pointer group">
                 <div className="bg-purple-500/10 w-fit p-2 rounded-lg text-purple-400 group-hover:bg-purple-500/20 mb-2">
-                   <PieIcon size={20} />
+                   <TrendingUp size={20} />
                 </div>
                 <div>
-                  <p className="text-white font-bold text-sm">Stats</p>
-                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Gráficas</p>
+                  <p className="text-white font-bold text-sm">Análisis</p>
+                  <p className="text-slate-500 text-[10px] uppercase tracking-wide">Reportes</p>
                 </div>
              </Card>
         </div>
@@ -590,7 +749,7 @@ export default function FinanceApp() {
             const percent = (b.spent / b.limit) * 100;
             const isOver = b.spent > b.limit;
             const isNearLimit = percent > 85 && !isOver;
-            //const overAmount = b.spent - b.limit;
+            const overAmount = b.spent - b.limit;
             const isEditing = editingId === b.id;
 
             let statusColor = "bg-green-500";
@@ -670,33 +829,75 @@ export default function FinanceApp() {
     if (!userData) return null;
     return (
       <div className="space-y-6 pb-24">
-        <h1 className="text-2xl font-bold text-white">Gastos Fijos</h1>
-        <p className="text-slate-400 text-sm -mt-4">Marca el check cuando hayas realizado el pago.</p>
+        <h1 className="text-2xl font-bold text-white">Gastos Fijos & Servicios</h1>
+        <p className="text-slate-400 text-sm -mt-4">Controla pagos como Gasolina, Luz o Renta.</p>
+        <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg flex gap-2 items-start text-xs text-blue-300 mb-2">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            <p>Los gastos se reinician automáticamente después de su día de corte mensual, guardando el historial.</p>
+        </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {userData.recurring.length === 0 && (
             <div className="text-center py-10 text-slate-500 border border-dashed border-slate-800 rounded-xl">
               No hay gastos fijos configurados.
             </div>
           )}
-          {userData.recurring.map(r => (
-            <div key={r.id} className={`p-4 rounded-xl border flex justify-between items-center transition-all ${r.isPaid ? 'bg-slate-900/50 border-slate-800 opacity-60' : 'bg-slate-900 border-slate-700'}`}>
-              <div className="flex items-center gap-3">
-                 <button 
-                   onClick={() => toggleRecurringPaid(r.id)}
-                   className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors shadow-sm ${r.isPaid ? 'bg-green-500 border-green-500 text-slate-900' : 'border-slate-600 hover:border-yellow-400 hover:bg-slate-800'}`}>
-                   {r.isPaid && <Check size={18} strokeWidth={4} />}
-                 </button>
-                 <div>
-                   <p className={`font-bold ${r.isPaid ? 'text-slate-500 line-through decoration-2' : 'text-white'}`}>{r.name}</p>
-                   <p className="text-xs text-slate-500">{r.category} • Día {r.dayOfMonth}</p>
-                 </div>
-              </div>
-              <span className={`font-mono font-bold text-lg ${r.isPaid ? 'text-slate-500' : 'text-white'}`}>
-                {formatCurrency(r.amount)}
-              </span>
-            </div>
-          ))}
+          {userData.recurring.map(r => {
+            const isFull = r.spent >= r.amount;
+            return (
+                <Card key={r.id} className="p-4 relative">
+                   <div className="absolute top-2 right-2 flex gap-2">
+                       <button 
+                          onClick={() => setHistoryRecurring(r)}
+                          className="p-1.5 text-slate-500 hover:text-blue-400 rounded hover:bg-slate-800"
+                       >
+                           <History size={14} />
+                       </button>
+                       <button 
+                         onClick={() => {
+                             setEditingRecurring(r);
+                             setIsConfirmingDelete(false);
+                         }}
+                         className="p-1.5 text-slate-500 hover:text-white rounded hover:bg-slate-800"
+                       >
+                           <Pencil size={14} />
+                       </button>
+                   </div>
+                   <div className="flex justify-between items-start mb-2 pr-16">
+                      <div className="flex gap-3">
+                         <div className={`p-2 rounded-lg h-fit ${isFull ? 'bg-green-500/10 text-green-500' : 'bg-slate-800 text-slate-400'}`}>
+                             {isFull ? <Check size={20} /> : <Zap size={20} />}
+                         </div>
+                         <div>
+                             <h3 className="text-white font-bold">{r.name}</h3>
+                             <p className="text-xs text-slate-400">Vence día {r.dayOfMonth}</p>
+                         </div>
+                      </div>
+                      <div className="text-right">
+                          <p className="text-white font-mono font-bold">{formatCurrency(r.spent)}</p>
+                          <p className="text-xs text-slate-500">de {formatCurrency(r.amount)}</p>
+                      </div>
+                   </div>
+
+                   <ProgressBar value={r.spent} max={r.amount} />
+                   
+                   <div className="mt-3 flex justify-between items-center">
+                       <p className={`text-xs font-bold ${isFull ? 'text-green-500' : r.spent > r.amount ? 'text-red-500' : 'text-slate-500'}`}>
+                           {isFull 
+                             ? (r.spent > r.amount ? `Excedido por ${formatCurrency(r.spent - r.amount)}` : 'Completado') 
+                             : `Restan ${formatCurrency(r.amount - r.spent)}`
+                           }
+                       </p>
+                       <button 
+                         onClick={() => setPayRecurringId(r.id)}
+                         className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-lg flex items-center gap-1 transition-colors"
+                       >
+                           <Plus size={12} /> Abonar
+                       </button>
+                   </div>
+                </Card>
+            );
+          })}
           
           <button 
             onClick={() => setIsRecurringModalOpen(true)}
@@ -706,74 +907,143 @@ export default function FinanceApp() {
              <span>Agregar Nuevo Gasto Fijo</span>
           </button>
         </div>
-      </div>
-    );
-  };
 
-  const AlertsView = () => {
-    if (!userData) return null;
-    
-    const alerts = [];
-    
-    userData.budgets.forEach(b => {
-      if(b.spent > b.limit) {
-        alerts.push({
-          type: 'critical',
-          title: `Presupuesto Excedido: ${b.name}`,
-          msg: `Te has pasado por ${formatCurrency(b.spent - b.limit)}. Reduce gastos en otras áreas.`
-        });
-      } else if (b.spent > b.limit * 0.85) {
-        alerts.push({
-          type: 'warning',
-          title: `Cuidado con ${b.name}`,
-          msg: `Has consumido el ${(b.spent/b.limit*100).toFixed(0)}% de este sobre.`
-        });
-      }
-    });
+        {/* Modal Historial de Gasto Fijo */}
+        {historyRecurring && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+             <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                 <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <History size={18} className="text-blue-400"/>
+                        Historial: {historyRecurring.name}
+                    </h2>
+                    <button onClick={() => setHistoryRecurring(null)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                 </div>
 
-    if(userData.goals.some(g => g.currentAmount === 0)) {
-        alerts.push({ type: 'info', title: 'Metas sin fondos', msg: 'No has aportado a tus metas este mes.' });
-    }
-
-    const unpaidCount = userData.recurring.filter(r => !r.isPaid).length;
-    if(unpaidCount > 0) {
-       alerts.push({ type: 'warning', title: 'Pagos Pendientes', msg: `Tienes ${unpaidCount} gastos fijos marcados como no pagados.` });
-    }
-
-    return (
-      <div className="space-y-6 pb-24">
-        <h1 className="text-2xl font-bold text-white">Centro de Alertas</h1>
-        
-        <div className="space-y-4">
-          {alerts.length === 0 ? (
-             <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-                <Check size={48} className="mb-4 text-green-500/50" />
-                <p>Todo está bajo control.</p>
+                 {!historyRecurring.history || historyRecurring.history.length === 0 ? (
+                     <p className="text-slate-500 text-sm text-center py-6">Aún no hay historial registrado para este servicio.</p>
+                 ) : (
+                    <>
+                       <div className="h-40 w-full">
+                           <ResponsiveContainer width="100%" height="100%">
+                               <BarChart data={historyRecurring.history}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                  <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} tickFormatter={(val) => val.split('-')[1]} />
+                                  <RechartsTooltip 
+                                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                                     formatter={(val: number) => formatCurrency(val)}
+                                  />
+                                  <Bar dataKey="spent" fill="#60A5FA" radius={[4, 4, 0, 0]} />
+                               </BarChart>
+                           </ResponsiveContainer>
+                       </div>
+                       
+                       <div className="space-y-3">
+                          {historyRecurring.history.slice().reverse().map((h, idx) => {
+                             const diff = h.spent - h.limit;
+                             const isOver = diff > 0;
+                             return (
+                               <div key={idx} className="bg-slate-800/50 p-3 rounded-lg">
+                                  <div className="flex justify-between text-xs mb-1">
+                                     <span className="text-slate-300 font-bold">{h.month}</span>
+                                     <span className={isOver ? "text-red-400" : "text-green-400"}>
+                                        {isOver ? `+${formatCurrency(diff)}` : `Ahorro: ${formatCurrency(Math.abs(diff))}`}
+                                     </span>
+                                  </div>
+                                  <ProgressBar value={h.spent} max={h.limit} />
+                                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                                     <span>Gastado: {formatCurrency(h.spent)}</span>
+                                     <span>Tope: {formatCurrency(h.limit)}</span>
+                                  </div>
+                               </div>
+                             )
+                          })}
+                       </div>
+                    </>
+                 )}
              </div>
-          ) : alerts.map((alert, idx) => (
-            <div key={idx} className={`p-4 rounded-xl border flex gap-4 ${
-               alert.type === 'critical' ? 'bg-red-500/10 border-red-500/30' : 
-               alert.type === 'warning' ? 'bg-yellow-500/10 border-yellow-500/30' : 
-               'bg-blue-500/10 border-blue-500/30'
-            }`}>
-               <div className={`p-2 rounded-lg h-fit ${
-                 alert.type === 'critical' ? 'bg-red-500 text-white' : 
-                 alert.type === 'warning' ? 'bg-yellow-500 text-slate-900' : 
-                 'bg-blue-500 text-white'
-               }`}>
-                 <AlertCircle size={20} />
-               </div>
-               <div>
-                 <h3 className={`font-bold text-sm ${
-                   alert.type === 'critical' ? 'text-red-400' : 
-                   alert.type === 'warning' ? 'text-yellow-400' : 
-                   'text-blue-400'
-                 }`}>{alert.title}</h3>
-                 <p className="text-slate-300 text-xs mt-1">{alert.msg}</p>
-               </div>
+          </div>
+        )}
+
+        {/* Modal Pago Parcial Gasto Fijo */}
+        {payRecurringId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                   <h2 className="text-lg font-bold text-white">Registrar Pago</h2>
+                   <p className="text-slate-400 text-sm">¿Cuánto pagaste hoy para este servicio?</p>
+                   <Input 
+                      autoFocus 
+                      type="number" 
+                      placeholder="Monto ($)" 
+                      value={payRecurringAmount} 
+                      onChange={e => setPayRecurringAmount(e.target.value)} 
+                   />
+                   <div className="flex gap-2 pt-2">
+                     <Button variant="secondary" className="flex-1" onClick={() => setPayRecurringId(null)}>Cancelar</Button>
+                     <Button className="flex-1" onClick={() => { 
+                         if(payRecurringAmount) addRecurringPayment(payRecurringId, Number(payRecurringAmount)); 
+                     }}>Registrar</Button>
+                   </div>
+                </div>
             </div>
-          ))}
-        </div>
+        )}
+
+        {/* Modal Editar Gasto Fijo */}
+        {editingRecurring && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4 relative">
+                   <h2 className="text-lg font-bold text-white">Editar Gasto Fijo</h2>
+                   
+                   {!isConfirmingDelete ? (
+                       <>
+                           <div>
+                               <Label>Nombre del Gasto</Label>
+                               <Input id="edit-rec-name" defaultValue={editingRecurring.name} />
+                           </div>
+                           <div>
+                               <Label>Monto Presupuesto</Label>
+                               <Input id="edit-rec-amount" type="number" defaultValue={editingRecurring.amount} />
+                           </div>
+                           <div>
+                               <Label>Día de Pago</Label>
+                               <Input id="edit-rec-day" type="number" defaultValue={editingRecurring.dayOfMonth} />
+                           </div>
+                           
+                           <div className="flex gap-2 pt-4">
+                             <Button variant="secondary" className="flex-1" onClick={() => setEditingRecurring(null)}>Cancelar</Button>
+                             <Button className="flex-1" onClick={() => { 
+                                 const name = (document.getElementById('edit-rec-name') as HTMLInputElement).value;
+                                 const amount = Number((document.getElementById('edit-rec-amount') as HTMLInputElement).value);
+                                 const day = Number((document.getElementById('edit-rec-day') as HTMLInputElement).value);
+                                 if(name && amount && day) editRecurringExpense(editingRecurring.id, name, amount, day); 
+                             }}>Guardar</Button>
+                           </div>
+
+                           <div className="pt-2 border-t border-slate-800 mt-2">
+                                <button 
+                                    onClick={() => setIsConfirmingDelete(true)}
+                                    className="w-full text-red-500 text-sm py-2 hover:bg-red-500/10 rounded-lg flex items-center justify-center gap-2"
+                                >
+                                    <Trash2 size={16} /> Eliminar Gasto
+                                </button>
+                           </div>
+                       </>
+                   ) : (
+                       <div className="py-4 space-y-4 text-center">
+                           <div className="mx-auto w-12 h-12 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mb-2">
+                               <AlertCircle size={24} />
+                           </div>
+                           <h3 className="text-white font-bold">¿Estás seguro?</h3>
+                           <p className="text-slate-400 text-sm">Esta acción eliminará el gasto fijo "{editingRecurring.name}" permanentemente.</p>
+                           <div className="flex gap-2 pt-4">
+                                <Button variant="secondary" className="flex-1" onClick={() => setIsConfirmingDelete(false)}>Cancelar</Button>
+                                <Button variant="danger" className="flex-1" onClick={() => deleteRecurringExpense(editingRecurring.id)}>Sí, Eliminar</Button>
+                           </div>
+                       </div>
+                   )}
+                </div>
+            </div>
+        )}
       </div>
     );
   };
@@ -781,70 +1051,159 @@ export default function FinanceApp() {
   const ReportsView = () => {
     if (!userData) return null;
     
-    // 1. Data for Variable Expenses (Budgets)
+    // 1. Data for General Expense Chart (Filtered)
+    const generalChartData = useMemo(() => {
+        const today = new Date();
+        const expenses = userData.transactions.filter(t => t.type === 'expense');
+        
+        if (generalChartFilter === 'week') {
+            // Group by day for the last 7 days? Or by week number? Let's do last 7 days for better visualization
+            const last7Days = Array.from({length: 7}, (_, i) => {
+                const d = new Date();
+                d.setDate(today.getDate() - (6 - i));
+                return d.toISOString().split('T')[0];
+            });
+            return last7Days.map(dateStr => {
+                const dayExpenses = expenses.filter(t => t.date.startsWith(dateStr));
+                const total = dayExpenses.reduce((sum, t) => sum + t.amount, 0);
+                // Format date to "Lun 10"
+                const dateObj = new Date(dateStr);
+                const name = dateObj.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric' });
+                return { name, total };
+            });
+        } else if (generalChartFilter === 'month') {
+            // Group by Week inside the current month? Or last 6 months? 
+            // Let's do Last 6 Months for "Month" view
+            const data = [];
+            for (let i = 5; i >= 0; i--) {
+                const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+                const monthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const monthExpenses = expenses.filter(t => t.date.startsWith(monthStr));
+                const total = monthExpenses.reduce((sum, t) => sum + t.amount, 0);
+                const name = d.toLocaleDateString('es-MX', { month: 'short' });
+                data.push({ name, total });
+            }
+            return data;
+        } else {
+            // Year view: Group by Month for current year
+            const currentYear = today.getFullYear();
+            const data = [];
+            for (let i = 0; i < 12; i++) {
+                const monthStr = `${currentYear}-${String(i + 1).padStart(2, '0')}`;
+                const monthExpenses = expenses.filter(t => t.date.startsWith(monthStr));
+                const total = monthExpenses.reduce((sum, t) => sum + t.amount, 0);
+                const d = new Date(currentYear, i, 1);
+                const name = d.toLocaleDateString('es-MX', { month: 'short' });
+                data.push({ name, total });
+            }
+            return data;
+        }
+    }, [userData.transactions, generalChartFilter]);
+
+
+    // 2. Data for Fixed Expenses Stacked Chart (Tower)
+    const fixedExpensesChartData = useMemo(() => {
+        // Aggregate history from all recurring expenses
+        const monthlyData: {[key: string]: { spent: number, limit: number }} = {};
+        
+        userData.recurring.forEach(r => {
+             (r.history || []).forEach(h => {
+                 if (!monthlyData[h.month]) monthlyData[h.month] = { spent: 0, limit: 0 };
+                 monthlyData[h.month].spent += h.spent;
+                 monthlyData[h.month].limit += h.limit;
+             });
+        });
+
+        // Add current month progress? 
+        // Optional: It might look weird if the month isn't finished. Let's stick to history.
+        
+        return Object.keys(monthlyData).sort().slice(-6).map(month => ({
+            name: month.split('-')[1], // Month number
+            Gasto: monthlyData[month].spent,
+            Presupuesto: monthlyData[month].limit
+        }));
+
+    }, [userData.recurring]);
+
+
+    // 3. Current Month Pie Chart Data
     const barData = userData.budgets.map(b => ({
       name: b.name,
       Presupuesto: b.limit,
       Gasto: b.spent,
     }));
 
-    // 2. NEW: Data for Fixed Expenses Progress
-    const totalFixed = userData.recurring.reduce((acc, r) => acc + r.amount, 0);
-    const paidFixed = userData.recurring.filter(r => r.isPaid).reduce((acc, r) => acc + r.amount, 0);
-    const pendingFixed = totalFixed - paidFixed;
-
-    // Data structure for the Fixed Expenses Chart
-    const fixedData = [
-      { name: 'Pagado', value: paidFixed, color: '#34D399' }, // Emerald/Green
-      { name: 'Pendiente', value: pendingFixed, color: '#475569' } // Slate/Gray
-    ];
-
     return (
       <div className="space-y-6 pb-24">
-        <h1 className="text-2xl font-bold text-white">Reportes</h1>
+        <h1 className="text-2xl font-bold text-white">Análisis Financiero</h1>
 
-        {/* --- NEW SECTION: Fixed Expenses Chart --- */}
+        {/* --- 1. General Expenses Chart (Time Filter) --- */}
         <Card className="p-4">
-          <h3 className="text-white mb-4 font-bold text-sm">Progreso de Gastos Fijos (Pagos)</h3>
-          
-          <div className="flex justify-between items-center px-4 mb-2">
-            <div className="text-center">
-               <p className="text-[10px] text-slate-400 uppercase">Total</p>
-               <p className="text-white font-mono font-bold">{formatCurrency(totalFixed)}</p>
-            </div>
-            <div className="text-center">
-               <p className="text-[10px] text-green-400 uppercase">Pagado</p>
-               <p className="text-green-400 font-mono font-bold">{formatCurrency(paidFixed)}</p>
-            </div>
-          </div>
-
-          <div className="h-48 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-               <PieChart>
-                  <Pie
-                    data={fixedData}
-                    cx="50%" cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {fixedData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                    <BarChart3 size={16} className="text-yellow-400"/>
+                    Gasto General
+                </h3>
+                <div className="flex bg-slate-800 rounded-lg p-0.5">
+                    {(['week', 'month', 'year'] as TimeFilter[]).map((f) => (
+                        <button
+                           key={f}
+                           onClick={() => setGeneralChartFilter(f)}
+                           className={`text-[10px] px-2 py-1 rounded-md transition-all ${generalChartFilter === f ? 'bg-yellow-400 text-slate-900 font-bold' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            {f === 'week' ? 'Sem' : f === 'month' ? 'Mes' : 'Año'}
+                        </button>
                     ))}
-                  </Pie>
-                  <RechartsTooltip 
-                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }} 
-                  />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle"/>
-               </PieChart>
-            </ResponsiveContainer>
-          </div>
+                </div>
+             </div>
+             
+             <div className="h-56 w-full text-xs">
+                 <ResponsiveContainer width="100%" height="100%">
+                     <BarChart data={generalChartData}>
+                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                         <XAxis dataKey="name" stroke="#94a3b8" />
+                         <YAxis stroke="#cbd5e1" width={40} tickFormatter={(val) => `$${val/1000}k`} />
+                         <RechartsTooltip 
+                             cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                             contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }} 
+                             formatter={(val: number) => formatCurrency(val)}
+                         />
+                         <Bar dataKey="total" fill="#F87171" radius={[4, 4, 0, 0]} name="Gasto Total" />
+                     </BarChart>
+                 </ResponsiveContainer>
+             </div>
         </Card>
 
-        {/* --- EXISTING SECTIONS: Variable Expenses --- */}
-        <h2 className="text-xl font-bold text-white mt-8 mb-2">Gastos Extraordinarios (Sobres)</h2>
+
+        {/* --- 2. Fixed Expenses Tower Chart (Budget vs Actual) --- */}
+        {fixedExpensesChartData.length > 0 && (
+             <Card className="p-4">
+                <div className="flex items-center gap-2 mb-4">
+                    <Zap size={16} className="text-blue-400" />
+                    <h3 className="text-white font-bold text-sm">Historial Fijos: Presupuesto vs Real</h3>
+                </div>
+                <div className="h-56 w-full text-xs">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={fixedExpensesChartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                            <XAxis dataKey="name" stroke="#94a3b8" label={{ value: 'Mes', position: 'insideBottom', offset: -5 }} />
+                            <YAxis stroke="#cbd5e1" width={40} />
+                            <RechartsTooltip 
+                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }} 
+                            />
+                            <Legend verticalAlign="top" height={36} />
+                            {/* Budget as an Area behind */}
+                            <Area type="monotone" dataKey="Presupuesto" fill="#3b82f6" stroke="#3b82f6" fillOpacity={0.1} />
+                            {/* Spent as a Bar */}
+                            <Bar dataKey="Gasto" fill="#60A5FA" barSize={20} radius={[4, 4, 0, 0]} />
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+             </Card>
+        )}
+
+        {/* --- 3. Current Month Variable Expenses --- */}
+        <h2 className="text-xl font-bold text-white mt-8 mb-2">Desglose Mensual (Sobres)</h2>
         
         <Card className="p-4">
           <h3 className="text-white mb-4 font-bold text-sm">Gasto Real vs Presupuesto</h3>
@@ -867,7 +1226,7 @@ export default function FinanceApp() {
         </Card>
 
         <Card className="p-4">
-          <h3 className="text-white mb-4 font-bold text-sm">Distribución por Categoría (Variables)</h3>
+          <h3 className="text-white mb-4 font-bold text-sm">Distribución por Categoría</h3>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -908,13 +1267,274 @@ export default function FinanceApp() {
             <div className="flex items-center justify-between">
               <span className="text-white">Reiniciar App</span>
               <button onClick={() => {
-                 localStorage.removeItem('finflow_2026_db');
+                 localStorage.removeItem('saldomensual_db_v2');
                  window.location.reload();
-              }} className="text-red-400 text-sm">Borrar Datos</button>
+              }} className="text-red-400 text-sm">Borrar Datos Locales</button>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-white">Estado de la Nube</span>
+              <span className="text-yellow-400 text-sm font-bold flex items-center gap-1"><HardDrive size={14}/> Guardado Local</span>
             </div>
          </Card>
        </div>
      );
+  };
+
+  // ... (Other Modals remain the same: AddTransactionModal, AddCategoryModal, AddRecurringModal, GoalsView)
+  
+  // Need to include GoalsView and Modal components here since we are inside the main component scope 
+  // and I didn't include them in the snippet above to save space, but they must be present.
+  // RE-INCLUDING THEM for completeness to avoid errors.
+
+  const GoalsView = () => {
+      if (!userData) return null;
+      return (
+        <div className="space-y-6 pb-24">
+          <h1 className="text-2xl font-bold text-white">Metas de Ahorro</h1>
+          <p className="text-slate-400 text-sm -mt-4">Define tus objetivos y hazlos realidad.</p>
+  
+          <div className="space-y-4">
+            {userData.goals.length === 0 && (
+              <div className="text-center py-10 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                No hay metas activas.
+              </div>
+            )}
+            {userData.goals.map(g => {
+              const percent = (g.currentAmount / g.targetAmount) * 100;
+              return (
+                  <Card key={g.id} className="p-4 relative">
+                     <div className="absolute top-2 right-2">
+                       <button 
+                         onClick={() => {
+                             setEditingGoal(g);
+                             setIsConfirmingDeleteGoal(false);
+                         }}
+                         className="p-1.5 text-slate-500 hover:text-white rounded hover:bg-slate-800"
+                       >
+                           <Pencil size={14} />
+                       </button>
+                     </div>
+
+                     <div className="flex justify-between items-start mb-2 pr-8">
+                        <div className="flex gap-3">
+                           <div className="p-2 rounded-lg h-fit bg-purple-500/10 text-purple-400">
+                               <Target size={20} />
+                           </div>
+                           <div>
+                               <h3 className="text-white font-bold">{g.name}</h3>
+                               <p className="text-xs text-green-400 font-bold">{percent.toFixed(0)}% Completado</p>
+                           </div>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-white font-mono font-bold">{formatCurrency(g.currentAmount)}</p>
+                            <p className="text-xs text-slate-500">Meta: {formatCurrency(g.targetAmount)}</p>
+                        </div>
+                     </div>
+  
+                     <ProgressBar value={g.currentAmount} max={g.targetAmount} isGoal={true} />
+                     
+                     <div className="mt-3 flex justify-end">
+                         <button 
+                           onClick={() => setGoalDepositId(g.id)}
+                           className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-lg shadow-purple-900/20"
+                         >
+                             <PiggyBank size={14} /> Depositar Ahorro
+                         </button>
+                     </div>
+                  </Card>
+              );
+            })}
+            
+            <button 
+              onClick={() => setIsGoalModalOpen(true)}
+              className="w-full py-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center justify-center gap-2 mt-4"
+            >
+               <Plus size={16} />
+               <span>Crear Nueva Meta</span>
+            </button>
+          </div>
+
+          {/* Modal Deposito Meta */}
+          {goalDepositId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                   <h2 className="text-lg font-bold text-white">Abonar a Meta</h2>
+                   <p className="text-slate-400 text-sm">¡Excelente! ¿Cuánto vas a ahorrar hoy?</p>
+                   <Input 
+                      autoFocus 
+                      type="number" 
+                      placeholder="Monto ($)" 
+                      value={goalDepositAmount} 
+                      onChange={e => setGoalDepositAmount(e.target.value)} 
+                   />
+                   <div className="flex gap-2 pt-2">
+                     <Button variant="secondary" className="flex-1" onClick={() => setGoalDepositId(null)}>Cancelar</Button>
+                     <Button className="flex-1" onClick={() => { 
+                         if(goalDepositAmount) addGoalDeposit(goalDepositId, Number(goalDepositAmount)); 
+                     }}>Guardar</Button>
+                   </div>
+                </div>
+            </div>
+          )}
+
+          {/* Modal Nueva Meta */}
+          {isGoalModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                   <h2 className="text-lg font-bold text-white">Nueva Meta de Ahorro</h2>
+                   <Input id="goal-name" autoFocus placeholder="Nombre (ej: Viaje a la Playa)" />
+                   <Input id="goal-target" type="number" placeholder="Monto Objetivo ($)" />
+                   <div className="flex gap-2 pt-2">
+                     <Button variant="secondary" className="flex-1" onClick={() => setIsGoalModalOpen(false)}>Cancelar</Button>
+                     <Button className="flex-1" onClick={() => { 
+                         const name = (document.getElementById('goal-name') as HTMLInputElement).value;
+                         const target = (document.getElementById('goal-target') as HTMLInputElement).value;
+                         if(name && target) addGoal(name, Number(target)); 
+                     }}>Crear</Button>
+                   </div>
+                </div>
+              </div>
+          )}
+
+          {/* Modal Editar Meta */}
+          {editingGoal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4 relative">
+                   <h2 className="text-lg font-bold text-white">Editar Meta</h2>
+                   
+                   {!isConfirmingDeleteGoal ? (
+                       <>
+                           <div>
+                               <Label>Nombre de la Meta</Label>
+                               <Input id="edit-goal-name" defaultValue={editingGoal.name} />
+                           </div>
+                           <div>
+                               <Label>Monto Objetivo</Label>
+                               <Input id="edit-goal-target" type="number" defaultValue={editingGoal.targetAmount} />
+                           </div>
+                           
+                           <div className="flex gap-2 pt-4">
+                             <Button variant="secondary" className="flex-1" onClick={() => setEditingGoal(null)}>Cancelar</Button>
+                             <Button className="flex-1" onClick={() => { 
+                                 const name = (document.getElementById('edit-goal-name') as HTMLInputElement).value;
+                                 const target = Number((document.getElementById('edit-goal-target') as HTMLInputElement).value);
+                                 if(name && target) editGoal(editingGoal.id, name, target); 
+                             }}>Guardar</Button>
+                           </div>
+
+                           <div className="pt-2 border-t border-slate-800 mt-2">
+                                <button 
+                                    onClick={() => setIsConfirmingDeleteGoal(true)}
+                                    className="w-full text-red-500 text-sm py-2 hover:bg-red-500/10 rounded-lg flex items-center justify-center gap-2"
+                                >
+                                    <Trash2 size={16} /> Eliminar Meta
+                                </button>
+                           </div>
+                       </>
+                   ) : (
+                       <div className="py-4 space-y-4 text-center">
+                           <div className="mx-auto w-12 h-12 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mb-2">
+                               <AlertCircle size={24} />
+                           </div>
+                           <h3 className="text-white font-bold">¿Estás seguro?</h3>
+                           <p className="text-slate-400 text-sm">Esta acción eliminará la meta "{editingGoal.name}" permanentemente.</p>
+                           <div className="flex gap-2 pt-4">
+                                <Button variant="secondary" className="flex-1" onClick={() => setIsConfirmingDeleteGoal(false)}>Cancelar</Button>
+                                <Button variant="danger" className="flex-1" onClick={() => deleteGoal(editingGoal.id)}>Sí, Eliminar</Button>
+                           </div>
+                       </div>
+                   )}
+                </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+  const AlertsView = () => {
+    if (!userData) return null;
+    const alerts = [];
+    
+    userData.budgets.forEach(b => {
+      if(b.spent > b.limit) {
+        alerts.push({
+          type: 'critical',
+          title: `Presupuesto Excedido: ${b.name}`,
+          msg: `Te has pasado por ${formatCurrency(b.spent - b.limit)}. Reduce gastos en otras áreas.`
+        });
+      } else if (b.spent > b.limit * 0.85) {
+        alerts.push({
+          type: 'warning',
+          title: `Cuidado con ${b.name}`,
+          msg: `Has consumido el ${(b.spent/b.limit*100).toFixed(0)}% de este sobre.`
+        });
+      }
+    });
+
+    userData.recurring.forEach(r => {
+        if (r.history && r.history.length > 0) {
+            const lastMonth = r.history[r.history.length - 1];
+            if (lastMonth.spent > lastMonth.limit) {
+                alerts.push({
+                   type: 'warning',
+                   title: `Exceso Pasado: ${r.name}`,
+                   msg: `El mes pasado gastaste ${formatCurrency(lastMonth.spent - lastMonth.limit)} de más en ${r.name}.`
+                });
+            } else if (lastMonth.spent < lastMonth.limit * 0.8) {
+                alerts.push({
+                   type: 'info',
+                   title: `Ahorro Detectado: ${r.name}`,
+                   msg: `¡Bien hecho! El mes pasado ahorraste en ${r.name}.`
+                });
+            }
+        }
+    });
+
+    if(userData.goals.length > 0 && userData.goals.some(g => g.currentAmount === 0)) {
+        alerts.push({ type: 'info', title: 'Metas sin fondos', msg: 'No has comenzado a ahorrar para algunas metas.' });
+    }
+
+    const unpaidCount = userData.recurring.filter(r => r.spent < r.amount).length;
+    if(unpaidCount > 0) {
+       alerts.push({ type: 'warning', title: 'Gastos Fijos Incompletos', msg: `Tienes ${unpaidCount} gastos fijos sin completar el presupuesto.` });
+    }
+
+    return (
+      <div className="space-y-6 pb-24">
+        <h1 className="text-2xl font-bold text-white">Centro de Alertas</h1>
+        
+        <div className="space-y-4">
+          {alerts.length === 0 ? (
+             <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                <Check size={48} className="mb-4 text-green-500/50" />
+                <p>Todo está bajo control.</p>
+             </div>
+          ) : alerts.map((alert, idx) => (
+            <div key={idx} className={`p-4 rounded-xl border flex gap-4 ${
+               alert.type === 'critical' ? 'bg-red-500/10 border-red-500/30' : 
+               alert.type === 'warning' ? 'bg-yellow-500/10 border-yellow-500/30' : 
+               'bg-blue-500/10 border-blue-500/30'
+            }`}>
+               <div className={`p-2 rounded-lg h-fit ${
+                 alert.type === 'critical' ? 'bg-red-500 text-white' : 
+                 alert.type === 'warning' ? 'bg-yellow-500 text-slate-900' : 
+                 'bg-blue-500 text-white'
+               }`}>
+                 <AlertCircle size={20} />
+               </div>
+               <div>
+                 <h3 className={`font-bold text-sm ${
+                   alert.type === 'critical' ? 'text-red-400' : 
+                   alert.type === 'warning' ? 'text-yellow-400' : 
+                   'text-blue-400'
+                 }`}>{alert.title}</h3>
+                 <p className="text-slate-300 text-xs mt-1">{alert.msg}</p>
+               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   const AddTransactionModal = () => {
@@ -971,7 +1591,7 @@ export default function FinanceApp() {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
         <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
-           <h2 className="text-lg font-bold text-white">Nuevo Sobre / Meta</h2>
+           <h2 className="text-lg font-bold text-white">Nuevo Sobre / Presupuesto</h2>
            <Input autoFocus placeholder="Nombre (ej: Ahorro Coche)" value={name} onChange={e => setName(e.target.value)} />
            <Input type="number" placeholder="Límite Mensual / Meta" value={limit} onChange={e => setLimit(e.target.value)} />
            <div className="flex gap-2 pt-2">
@@ -993,9 +1613,10 @@ export default function FinanceApp() {
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
         <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
            <h2 className="text-lg font-bold text-white">Nuevo Gasto Fijo</h2>
-           <Input autoFocus placeholder="Nombre (ej: Seguro Auto)" value={name} onChange={e => setName(e.target.value)} />
-           <Input type="number" placeholder="Monto Mensual" value={amount} onChange={e => setAmount(e.target.value)} />
-           <Input type="number" placeholder="Día de pago (1-31)" value={day} onChange={e => setDay(e.target.value)} />
+           <p className="text-slate-400 text-xs">Ej: Renta, Gasolina, Luz</p>
+           <Input autoFocus placeholder="Nombre (ej: Gasolina)" value={name} onChange={e => setName(e.target.value)} />
+           <Input type="number" placeholder="Monto Presupuesto" value={amount} onChange={e => setAmount(e.target.value)} />
+           <Input type="number" placeholder="Día de pago aprox (1-31)" value={day} onChange={e => setDay(e.target.value)} />
            <div className="flex gap-2 pt-2">
              <Button variant="secondary" className="flex-1" onClick={() => setIsRecurringModalOpen(false)}>Cancelar</Button>
              <Button className="flex-1" onClick={() => { if(name && amount && day) addRecurringExpense(name, Number(amount), Number(day)); }}>Crear</Button>
@@ -1018,6 +1639,7 @@ export default function FinanceApp() {
           {view === 'dashboard' && <Dashboard />}
           {view === 'budget' && <BudgetView />}
           {view === 'recurring' && <RecurringView />}
+          {view === 'goals' && <GoalsView />}
           {view === 'alerts' && <AlertsView />}
           {view === 'reports' && <ReportsView />}
           {view === 'settings' && <SettingsView />}
@@ -1040,12 +1662,12 @@ export default function FinanceApp() {
             </div>
             {/* Shortcuts in Nav */}
             <button onClick={() => setView('recurring')} className={`flex flex-col items-center gap-1 p-2 ${view === 'recurring' ? 'text-yellow-400' : 'text-slate-500'}`}>
-              <CreditCard size={20} />
+              <Zap size={20} />
               <span className="text-[10px]">Fijos</span>
             </button>
             <button onClick={() => setView('reports')} className={`flex flex-col items-center gap-1 p-2 ${view === 'reports' ? 'text-yellow-400' : 'text-slate-500'}`}>
-              <PieIcon size={20} />
-              <span className="text-[10px]">Stats</span>
+              <TrendingUp size={20} />
+              <span className="text-[10px]">Análisis</span>
             </button>
           </div>
         </nav>
