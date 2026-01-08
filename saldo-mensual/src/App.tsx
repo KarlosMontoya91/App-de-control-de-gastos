@@ -11,7 +11,7 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   Legend,
-  ComposedChart,
+  AreaChart,
   Area,
 } from "recharts";
 import {
@@ -19,14 +19,12 @@ import {
   Plus,
   Home,
   Settings,
-  ArrowRight,
   ArrowUpRight,
   ArrowDownLeft,
   Check,
   User,
   Calendar,
   Info,
-  AlertCircle,
   Camera,
   AlertTriangle,
   Pencil,
@@ -35,12 +33,10 @@ import {
   Cloud,
   Loader2,
   Target,
-  PiggyBank,
   Zap,
   Trash2,
   History,
   TrendingUp,
-  BarChart3,
   LogOut,
 } from "lucide-react";
 
@@ -61,8 +57,6 @@ import {
   setDoc,
   onSnapshot,
   type Firestore,
-  type DocumentData,
-  type DocumentSnapshot,
 } from "firebase/firestore";
 
 // --- CONFIGURACIÓN DE FIREBASE ---
@@ -94,6 +88,16 @@ try {
 type Frequency = "quincenal" | "mensual" | "semanal";
 type TransactionType = "expense" | "income";
 type TimeFilter = "week" | "month" | "year";
+
+type View =
+  | "onboarding"
+  | "dashboard"
+  | "budget"
+  | "recurring"
+  | "alerts"
+  | "reports"
+  | "settings"
+  | "goals";
 
 interface Transaction {
   id: string;
@@ -159,10 +163,12 @@ interface UserProfile {
 }
 
 // --- UTILS ---
-const generateId = () => Math.random().toString(36).substr(2, 9);
+const generateId = () => Math.random().toString(36).slice(2, 11);
 
 const formatCurrency = (amount: number, currency = "MXN") =>
-  new Intl.NumberFormat("es-MX", { style: "currency", currency }).format(amount);
+  new Intl.NumberFormat("es-MX", { style: "currency", currency }).format(
+    Number.isFinite(amount) ? amount : 0
+  );
 
 const DEFAULT_CATEGORIES = [
   { name: "Vivienda", color: "#60A5FA" },
@@ -229,7 +235,7 @@ const Button = ({
     ghost:
       "bg-transparent text-slate-400 hover:text-white hover:bg-slate-800/50",
     danger:
-      "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20",
+      "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20",
   };
   return (
     <button
@@ -246,7 +252,9 @@ const Button = ({
 const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input
     {...props}
-    className={`w-full bg-slate-950 border border-slate-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:border-yellow-400 transition-all placeholder:text-slate-600 ${props.className}`}
+    className={`w-full bg-slate-950 border border-slate-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:border-yellow-400 transition-all placeholder:text-slate-600 ${
+      props.className || ""
+    }`}
   />
 );
 
@@ -267,16 +275,16 @@ const ProgressBar = ({
   colorOverride?: string;
   isGoal?: boolean;
 }) => {
-  const percentage = Math.min(100, Math.max(0, (value / max) * 100));
+  const safeMax = Number.isFinite(max) && max > 0 ? max : 1;
+  const percentage = Math.min(100, Math.max(0, (value / safeMax) * 100));
 
   let colorClass = "bg-green-500";
   if (!colorOverride) {
-    if (isGoal) {
-      colorClass = percentage < 50 ? "bg-yellow-400" : "bg-green-500";
-    } else {
+    if (isGoal) colorClass = percentage < 50 ? "bg-yellow-400" : "bg-green-500";
+    else {
       if (percentage > 100) colorClass = "bg-red-500";
       else if (percentage > 85) colorClass = "bg-yellow-400";
-      if (value > max) colorClass = "bg-red-500";
+      if (value > safeMax) colorClass = "bg-red-500";
     }
   }
 
@@ -290,15 +298,65 @@ const ProgressBar = ({
   );
 };
 
+// --- ERROR BOUNDARY (para que NO quede blanco) ---
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message?: string; stack?: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(err: any) {
+    return { hasError: true, message: String(err?.message || err) };
+  }
+
+  componentDidCatch(error: any) {
+    // eslint-disable-next-line no-console
+    console.error("APP ERROR:", error);
+    this.setState({ stack: String(error?.stack || "") });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-200 p-6">
+          <div className="max-w-md mx-auto space-y-3">
+            <h1 className="text-xl font-bold text-red-400">
+              La app tronó (pero ya no queda en blanco)
+            </h1>
+            <p className="text-slate-300 text-sm">
+              Copia este error y me lo pasas si vuelve a salir:
+            </p>
+            <pre className="text-xs bg-slate-900 border border-slate-800 rounded-xl p-4 overflow-auto whitespace-pre-wrap">
+              {this.state.message}
+              {"\n\n"}
+              {this.state.stack}
+            </pre>
+            <Button
+              variant="secondary"
+              onClick={() => window.location.reload()}
+            >
+              Recargar
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- SPLASH SCREEN ---
 const SplashScreen = ({ onFinish }: { onFinish: () => void }) => {
   useEffect(() => {
-    const timer = setTimeout(onFinish, 2500);
+    const timer = setTimeout(onFinish, 1200);
     return () => clearTimeout(timer);
   }, [onFinish]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center animate-out fade-out duration-700 delay-[2s] fill-mode-forwards pointer-events-none">
+    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center animate-out fade-out duration-700 delay-[1s] fill-mode-forwards pointer-events-none">
       <div className="flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div className="bg-yellow-400 p-5 rounded-3xl mb-6 shadow-[0_0_50px_rgba(250,204,21,0.4)]">
           <Wallet size={64} className="text-slate-950" strokeWidth={2} />
@@ -325,11 +383,12 @@ const LoginScreen = () => {
       return;
     }
     setIsLoading(true);
+    setError("");
+
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Error desconocido";
+      const message = err instanceof Error ? err.message : "Error desconocido";
       setError("Error al iniciar sesión: " + message);
       setIsLoading(false);
     }
@@ -343,6 +402,7 @@ const LoginScreen = () => {
             <Wallet size={48} className="text-slate-950" strokeWidth={2} />
           </div>
         </div>
+
         <h1 className="text-4xl font-bold text-white tracking-tight">
           Bienvenido
         </h1>
@@ -385,8 +445,12 @@ const LoginScreen = () => {
         </div>
 
         {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 text-sm">
             {error}
+            <div className="text-[11px] text-slate-400 mt-2">
+              Tip: Si estás en GitHub Pages, asegúrate de agregar tu dominio en:
+              Firebase Console → Authentication → Settings → Authorized domains.
+            </div>
           </div>
         )}
       </div>
@@ -413,45 +477,36 @@ export default function FinanceApp() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
 
-  const [view, setView] = useState<
-    | "onboarding"
-    | "dashboard"
-    | "budget"
-    | "recurring"
-    | "alerts"
-    | "reports"
-    | "settings"
-    | "goals"
-  >("dashboard");
+  const [view, setView] = useState<View>("dashboard");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
 
-  // Add modals you NEED:
+  // Modals
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isRecurringModalOpen, setIsRecurringModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
 
-  // Edit Recurring Modal
+  // Edit Recurring
   const [editingRecurring, setEditingRecurring] =
     useState<RecurringExpense | null>(null);
   const [historyRecurring, setHistoryRecurring] =
     useState<RecurringExpense | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
-  // Edit Goal Modal
+  // Edit Goal
   const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
   const [isConfirmingDeleteGoal, setIsConfirmingDeleteGoal] = useState(false);
 
-  // Partial Payment Modal State
+  // Partial Payment Recurring
   const [payRecurringId, setPayRecurringId] = useState<string | null>(null);
   const [payRecurringAmount, setPayRecurringAmount] = useState("");
 
-  // Add Money to Goal Modal State
+  // Goal deposit
   const [goalDepositId, setGoalDepositId] = useState<string | null>(null);
   const [goalDepositAmount, setGoalDepositAmount] = useState("");
 
-  // General Chart State
+  // Reports filter
   const [generalChartFilter, setGeneralChartFilter] =
     useState<TimeFilter>("month");
 
@@ -480,7 +535,6 @@ export default function FinanceApp() {
 
   const normalizeProfile = (raw: any, uid: string): UserProfile => {
     const cfg = raw?.config ?? {};
-
     return {
       id: uid,
       config: {
@@ -499,10 +553,10 @@ export default function FinanceApp() {
     };
   };
 
-
   const loadUserData = async (firebaseUser: FirebaseUser) => {
     if (!db) return;
     setLoadingData(true);
+
     try {
       const userDocRef = doc(db, "users", firebaseUser.uid);
 
@@ -510,7 +564,6 @@ export default function FinanceApp() {
         if (docSnap.exists()) {
           const raw = docSnap.data();
           let profile = normalizeProfile(raw, firebaseUser.uid);
-
           profile = checkRecurringResets(profile);
           setCurrentUser(profile);
 
@@ -544,8 +597,8 @@ export default function FinanceApp() {
 
         setLoadingData(false);
       });
-
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("Error loading data:", error);
       setLoadingData(false);
     }
@@ -557,6 +610,7 @@ export default function FinanceApp() {
       const userDocRef = doc(db, "users", auth.currentUser.uid);
       await setDoc(userDocRef, updatedProfile, { merge: true });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error("Error saving to DB:", e);
     }
   };
@@ -581,9 +635,7 @@ export default function FinanceApp() {
       }
 
       if (lastReset !== currentMonthStr) {
-        if (today.getDate() >= r.dayOfMonth) {
-          shouldReset = true;
-        }
+        if (today.getDate() >= r.dayOfMonth) shouldReset = true;
       }
 
       if (shouldReset) {
@@ -608,7 +660,9 @@ export default function FinanceApp() {
 
     if (hasChanges) {
       const newProfile = { ...profile, recurring: updatedRecurring };
-      setDoc(doc(db, "users", auth.currentUser.uid), newProfile, { merge: true });
+      setDoc(doc(db, "users", auth.currentUser.uid), newProfile, {
+        merge: true,
+      });
       return newProfile;
     }
 
@@ -669,7 +723,13 @@ export default function FinanceApp() {
     if (!currentUser) return;
     const updatedRecurring = currentUser.recurring.map((r) => {
       if (r.id === id) {
-        return { ...r, name, amount, dayOfMonth: day, isPaid: r.spent >= amount };
+        return {
+          ...r,
+          name,
+          amount,
+          dayOfMonth: day,
+          isPaid: r.spent >= amount,
+        };
       }
       return r;
     });
@@ -732,12 +792,16 @@ export default function FinanceApp() {
       spent: 0,
       color,
     };
-    saveUserToDb({ ...currentUser, budgets: [...currentUser.budgets, newBudget] });
+    saveUserToDb({
+      ...currentUser,
+      budgets: [...currentUser.budgets, newBudget],
+    });
     setIsCategoryModalOpen(false);
   };
 
   const addRecurringExpense = (name: string, amount: number, day: number) => {
     if (!currentUser) return;
+
     const today = new Date();
     const currentMonthStr = `${today.getFullYear()}-${String(
       today.getMonth() + 1
@@ -776,8 +840,11 @@ export default function FinanceApp() {
 
   const finishOnboarding = (formData: Partial<UserProfile>) => {
     if (!currentUser) return;
+
     const recurringTotal =
-      formData.recurring?.reduce((sum, item) => sum + item.amount, 0) || 0;
+      formData.recurring?.reduce((sum, item) => sum + (item.amount || 0), 0) ||
+      0;
+
     const disposable = (formData.config?.monthlyIncome || 0) - recurringTotal;
     const budgetPerCategory = Math.floor(
       (disposable * 0.9) / DEFAULT_CATEGORIES.length
@@ -795,11 +862,14 @@ export default function FinanceApp() {
     const currentMonthStr = `${today.getFullYear()}-${String(
       today.getMonth() + 1
     ).padStart(2, "0")}`;
+
     const initRecurring = (formData.recurring || []).map((r) => ({
       ...r,
       lastResetDate: currentMonthStr,
       history: [],
-    }));
+    })) as RecurringExpense[];
+
+    const income = formData.config?.monthlyIncome || 0;
 
     const finalProfile: UserProfile = {
       ...currentUser,
@@ -815,7 +885,7 @@ export default function FinanceApp() {
         {
           id: generateId(),
           name: "Fondo de Emergencia",
-          targetAmount: (formData.config?.monthlyIncome || 0) * 3,
+          targetAmount: income * 3,
           currentAmount: 0,
         },
       ],
@@ -844,9 +914,7 @@ export default function FinanceApp() {
 
     const parsedAmount = Number(amount);
     const isValid =
-      Number.isFinite(parsedAmount) &&
-      parsedAmount > 0 &&
-      category.trim().length > 0;
+      Number.isFinite(parsedAmount) && parsedAmount > 0 && category.trim();
 
     const handleSave = () => {
       setError("");
@@ -880,19 +948,21 @@ export default function FinanceApp() {
           <div className="flex gap-2">
             <button
               onClick={() => setType("expense")}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${type === "expense"
-                ? "bg-red-500/15 border-red-500/30 text-red-300"
-                : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
-                }`}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${
+                type === "expense"
+                  ? "bg-red-500/15 border-red-500/30 text-red-300"
+                  : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+              }`}
             >
               Gasto
             </button>
             <button
               onClick={() => setType("income")}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${type === "income"
-                ? "bg-green-500/15 border-green-500/30 text-green-300"
-                : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
-                }`}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${
+                type === "income"
+                  ? "bg-green-500/15 border-green-500/30 text-green-300"
+                  : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+              }`}
             >
               Ingreso
             </button>
@@ -930,7 +1000,11 @@ export default function FinanceApp() {
 
           <div>
             <Label>Fecha</Label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
           </div>
 
           <div>
@@ -965,13 +1039,79 @@ export default function FinanceApp() {
     );
   };
 
-  // Modal: Nuevo Sobre
+  const AddCategoryModal = () => {
+    const [name, setName] = useState("");
+    const [limit, setLimit] = useState("");
+    const parsedLimit = Number(limit);
+
+    const valid =
+      name.trim().length >= 2 &&
+      Number.isFinite(parsedLimit) &&
+      parsedLimit > 0;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+        <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">Nuevo Sobre</h2>
+            <button
+              onClick={() => setIsCategoryModalOpen(false)}
+              className="text-slate-400 hover:text-white"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div>
+            <Label>Nombre</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ej: Mascotas"
+            />
+          </div>
+
+          <div>
+            <Label>Límite mensual</Label>
+            <Input
+              inputMode="decimal"
+              value={limit}
+              onKeyDown={preventInvalidNumberKeys}
+              onChange={(e) => setLimit(sanitizeAmount(e.target.value))}
+              placeholder="Ej: 1500"
+            />
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setIsCategoryModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={!valid}
+              onClick={() => addBudgetCategory(name.trim(), parsedLimit)}
+            >
+              Crear
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const AddGoalModal = () => {
     const [name, setName] = useState("");
     const [target, setTarget] = useState("");
 
     const parsedTarget = Number(target);
-    const valid = name.trim().length >= 2 && Number.isFinite(parsedTarget) && parsedTarget > 0;
+    const valid =
+      name.trim().length >= 2 &&
+      Number.isFinite(parsedTarget) &&
+      parsedTarget > 0;
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -988,7 +1128,11 @@ export default function FinanceApp() {
 
           <div>
             <Label>Nombre</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: iPhone / Viaje / Fondo" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ej: Viaje / Fondo / iPhone"
+            />
           </div>
 
           <div>
@@ -1003,7 +1147,11 @@ export default function FinanceApp() {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setIsGoalModalOpen(false)}>
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setIsGoalModalOpen(false)}
+            >
               Cancelar
             </Button>
             <Button
@@ -1019,8 +1167,6 @@ export default function FinanceApp() {
     );
   };
 
-
-  // Modal: Nuevo Gasto Fijo
   const AddRecurringModal = () => {
     const [name, setName] = useState("");
     const [amount, setAmount] = useState("");
@@ -1028,6 +1174,7 @@ export default function FinanceApp() {
 
     const parsedAmount = Number(amount);
     const parsedDay = Number(day);
+
     const valid =
       name.trim().length >= 2 &&
       Number.isFinite(parsedAmount) &&
@@ -1051,7 +1198,11 @@ export default function FinanceApp() {
 
           <div>
             <Label>Nombre</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Internet" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ej: Internet"
+            />
           </div>
 
           <div>
@@ -1076,7 +1227,11 @@ export default function FinanceApp() {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setIsRecurringModalOpen(false)}>
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setIsRecurringModalOpen(false)}
+            >
               Cancelar
             </Button>
             <Button
@@ -1095,21 +1250,54 @@ export default function FinanceApp() {
   // --- SUB-VIEWS ---
   const OnboardingWizard = () => {
     const [step, setStep] = useState(1);
-    const [formData, setFormData] = useState<Partial<UserProfile>>({
-      config: currentUser?.config,
-      recurring: [],
-      budgets: [],
-      goals: [],
-      transactions: [],
-      id: currentUser?.id,
-    });
 
-    const recurringTotal =
-      formData.recurring?.reduce((sum, item) => sum + item.amount, 0) || 0;
-    const income = formData.config?.monthlyIncome || 0;
-    const estimatedAvailable = income - recurringTotal;
+    const [name, setName] = useState(currentUser?.config?.name || "");
+    const [income, setIncome] = useState(
+      String(currentUser?.config?.monthlyIncome || "")
+    );
 
-    const canGoNext = (formData.recurring?.length || 0) >= 3;
+    const [recName, setRecName] = useState("");
+    const [recAmount, setRecAmount] = useState("");
+
+    const [recurringDraft, setRecurringDraft] = useState<
+      Array<Pick<RecurringExpense, "id" | "name" | "amount" | "spent" | "category" | "dayOfMonth">>
+    >([]);
+
+    const parsedIncome = Number(income);
+    const recurringTotal = recurringDraft.reduce((s, r) => s + r.amount, 0);
+    const estimatedAvailable = (Number.isFinite(parsedIncome) ? parsedIncome : 0) - recurringTotal;
+
+    const canGoNext = recurringDraft.length >= 3;
+
+    const addRec = () => {
+      const amt = Number(recAmount);
+      if (!recName.trim() || !Number.isFinite(amt) || amt <= 0) return;
+      setRecurringDraft((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          name: recName.trim(),
+          amount: amt,
+          spent: 0,
+          category: "Servicios",
+          dayOfMonth: 1,
+        },
+      ]);
+      setRecName("");
+      setRecAmount("");
+    };
+
+    const finish = () => {
+      const formData: Partial<UserProfile> = {
+        config: {
+          ...(currentUser?.config as UserConfig),
+          name: name.trim() || "Usuario",
+          monthlyIncome: Number.isFinite(parsedIncome) ? parsedIncome : 0,
+        },
+        recurring: recurringDraft as any,
+      };
+      finishOnboarding(formData);
+    };
 
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 animate-in fade-in duration-500">
@@ -1124,31 +1312,24 @@ export default function FinanceApp() {
           <Card className="p-6 space-y-6">
             {step === 1 && (
               <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">1. Datos Básicos</h2>
+                <h2 className="text-xl font-semibold text-white">
+                  1. Datos Básicos
+                </h2>
+
                 <Input
                   placeholder="Tu nombre"
-                  value={formData.config?.name || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      config: { ...(formData.config as UserConfig), name: e.target.value },
-                    })
-                  }
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                 />
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="Ingreso Mensual Neto"
-                  value={formData.config?.monthlyIncome || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      config: {
-                        ...(formData.config as UserConfig),
-                        monthlyIncome: Number(e.target.value),
-                      },
-                    })
-                  }
+                  value={income}
+                  onKeyDown={preventInvalidNumberKeys}
+                  onChange={(e) => setIncome(sanitizeAmount(e.target.value))}
                 />
+
                 <Button className="w-full mt-4" onClick={() => setStep(2)}>
                   Siguiente
                 </Button>
@@ -1157,12 +1338,14 @@ export default function FinanceApp() {
 
             {step === 2 && (
               <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">2. Gastos Fijos (Estimados)</h2>
+                <h2 className="text-xl font-semibold text-white">
+                  2. Gastos Fijos (Estimados)
+                </h2>
 
                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {formData.recurring?.map((r, idx) => (
+                  {recurringDraft.map((r) => (
                     <div
-                      key={idx}
+                      key={r.id}
                       className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-800"
                     >
                       <span className="text-white text-sm">{r.name}</span>
@@ -1174,50 +1357,24 @@ export default function FinanceApp() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  <Input id="rec-name" placeholder="Ej: Netflix" className="text-sm" />
                   <Input
-                    id="rec-amount"
+                    placeholder="Ej: Netflix"
+                    className="text-sm"
+                    value={recName}
+                    onChange={(e) => setRecName(e.target.value)}
+                  />
+                  <Input
                     type="text"
                     inputMode="decimal"
                     placeholder="$ Tope"
                     className="text-sm"
+                    value={recAmount}
                     onKeyDown={preventInvalidNumberKeys}
-                    onChange={(e) => {
-                      (e.target as HTMLInputElement).value = sanitizeAmount(
-                        (e.target as HTMLInputElement).value
-                      );
-                    }}
+                    onChange={(e) => setRecAmount(sanitizeAmount(e.target.value))}
                   />
                 </div>
 
-                <Button
-                  variant="secondary"
-                  className="w-full py-2 text-sm"
-                  onClick={() => {
-                    const name = (document.getElementById("rec-name") as HTMLInputElement).value;
-                    const amount = Number(
-                      (document.getElementById("rec-amount") as HTMLInputElement).value
-                    );
-                    if (name && amount) {
-                      setFormData({
-                        ...formData,
-                        recurring: [
-                          ...(formData.recurring || []),
-                          {
-                            id: generateId(),
-                            name,
-                            amount,
-                            spent: 0,
-                            category: "Servicios",
-                            dayOfMonth: 1,
-                          },
-                        ],
-                      });
-                      (document.getElementById("rec-name") as HTMLInputElement).value = "";
-                      (document.getElementById("rec-amount") as HTMLInputElement).value = "";
-                    }
-                  }}
-                >
+                <Button variant="secondary" className="w-full py-2 text-sm" onClick={addRec}>
                   + Agregar
                 </Button>
 
@@ -1240,7 +1397,7 @@ export default function FinanceApp() {
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-slate-400">Ingreso Mensual</span>
                     <span className="text-white font-medium">
-                      {formatCurrency(income)}
+                      {formatCurrency(Number.isFinite(parsedIncome) ? parsedIncome : 0)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
@@ -1257,7 +1414,7 @@ export default function FinanceApp() {
                   </div>
                 </div>
 
-                <Button className="w-full mt-6" onClick={() => finishOnboarding(formData)}>
+                <Button className="w-full mt-6" onClick={finish}>
                   <Check size={18} /> Finalizar Setup
                 </Button>
               </div>
@@ -1275,27 +1432,27 @@ export default function FinanceApp() {
       .filter((t) => t.type === "expense")
       .reduce((acc, t) => acc + t.amount, 0);
 
-    const totalIncome = currentUser.transactions
+    const totalIncomeExtra = currentUser.transactions
       .filter((t) => t.type === "income")
       .reduce((acc, t) => acc + t.amount, 0);
 
     const fixedSpent = currentUser.recurring.reduce((acc, r) => acc + r.spent, 0);
 
     const currentBalance =
-      currentUser.config.monthlyIncome + totalIncome - fixedSpent - variableSpent;
+      currentUser.config.monthlyIncome + totalIncomeExtra - fixedSpent - variableSpent;
 
     const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          saveUserToDb({
-            ...currentUser,
-            config: { ...currentUser.config, avatar: reader.result as string },
-          });
-        };
-        reader.readAsDataURL(file);
-      }
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        saveUserToDb({
+          ...currentUser,
+          config: { ...currentUser.config, avatar: reader.result as string },
+        });
+      };
+      reader.readAsDataURL(file);
     };
 
     return (
@@ -1316,7 +1473,12 @@ export default function FinanceApp() {
               </div>
               <label className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-all z-10 backdrop-blur-sm">
                 <Camera size={18} className="text-white" />
-                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarUpload}
+                />
               </label>
             </div>
 
@@ -1346,6 +1508,7 @@ export default function FinanceApp() {
           <button
             onClick={() => setView("settings")}
             className="p-2 bg-slate-900 rounded-full border border-slate-800 text-slate-400 hover:text-white transition-colors"
+            title="Ajustes"
           >
             <Settings size={20} />
           </button>
@@ -1357,11 +1520,15 @@ export default function FinanceApp() {
               Disponible Real
             </p>
             <h2 className="text-4xl font-bold text-slate-900 tracking-tighter">
-              {formatCurrency(currentBalance)}
+              {formatCurrency(currentBalance, currentUser.config.currency)}
             </h2>
             <div className="mt-4 flex flex-wrap gap-2 text-slate-900/80 text-xs font-bold">
               <span className="bg-white/20 px-2 py-1 rounded">
-                Ingresos: {formatCurrency(currentUser.config.monthlyIncome + totalIncome)}
+                Ingresos:{" "}
+                {formatCurrency(
+                  currentUser.config.monthlyIncome + totalIncomeExtra,
+                  currentUser.config.currency
+                )}
               </span>
             </div>
           </div>
@@ -1432,7 +1599,10 @@ export default function FinanceApp() {
         <div>
           <div className="flex items-center justify-between mb-4 mt-2">
             <h3 className="text-lg font-bold text-white">Movimientos Recientes</h3>
-            <button onClick={() => setView("reports")} className="text-xs text-yellow-400">
+            <button
+              onClick={() => setView("reports")}
+              className="text-xs text-yellow-400"
+            >
               Ver reporte
             </button>
           </div>
@@ -1450,10 +1620,11 @@ export default function FinanceApp() {
                 >
                   <div className="flex gap-3 items-center">
                     <div
-                      className={`p-2 rounded-full h-fit ${t.type === "expense"
-                        ? "bg-red-500/10 text-red-500"
-                        : "bg-green-500/10 text-green-500"
-                        }`}
+                      className={`p-2 rounded-full h-fit ${
+                        t.type === "expense"
+                          ? "bg-red-500/10 text-red-500"
+                          : "bg-green-500/10 text-green-500"
+                      }`}
                     >
                       {t.type === "expense" ? (
                         <ArrowUpRight size={16} />
@@ -1469,11 +1640,12 @@ export default function FinanceApp() {
                     </div>
                   </div>
                   <span
-                    className={`font-mono font-bold ${t.type === "expense" ? "text-white" : "text-green-400"
-                      }`}
+                    className={`font-mono font-bold ${
+                      t.type === "expense" ? "text-white" : "text-green-400"
+                    }`}
                   >
                     {t.type === "expense" ? "-" : "+"}
-                    {formatCurrency(t.amount)}
+                    {formatCurrency(t.amount, currentUser.config.currency)}
                   </span>
                 </div>
               ))
@@ -1486,31 +1658,41 @@ export default function FinanceApp() {
 
   const BudgetView = () => {
     if (!currentUser) return null;
+
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editAmount, setEditAmount] = useState("");
 
     const startEditing = (b: BudgetCategory) => {
       setEditingId(b.id);
-      setEditAmount(b.limit.toString());
+      setEditAmount(String(b.limit));
     };
 
     const saveEdit = (id: string) => {
-      if (editAmount) {
-        updateBudgetLimit(id, Number(editAmount));
+      const n = Number(editAmount);
+      if (Number.isFinite(n) && n > 0) {
+        updateBudgetLimit(id, n);
         setEditingId(null);
       }
     };
 
     return (
       <div className="space-y-6 pb-24">
-        <h1 className="text-2xl font-bold text-white">Presupuestos (Sobres)</h1>
-        <p className="text-slate-400 text-sm -mt-4">
-          Control de gastos variables por categoría
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Presupuestos (Sobres)</h1>
+            <p className="text-slate-400 text-sm">
+              Control de gastos variables por categoría
+            </p>
+          </div>
+          <Button onClick={() => setIsCategoryModalOpen(true)} className="h-10 px-3">
+            <Plus size={18} /> Nuevo
+          </Button>
+        </div>
 
         <div className="space-y-4">
           {currentUser.budgets.map((b) => {
-            const percent = (b.spent / b.limit) * 100;
+            const safeLimit = b.limit > 0 ? b.limit : 1;
+            const percent = (b.spent / safeLimit) * 100;
             const isOver = b.spent > b.limit;
             const isNearLimit = percent > 85 && !isOver;
             const isEditing = editingId === b.id;
@@ -1520,7 +1702,10 @@ export default function FinanceApp() {
             else if (isNearLimit) statusColor = "bg-yellow-400";
 
             return (
-              <Card key={b.id} className="p-4 relative overflow-visible transition-all hover:border-slate-700">
+              <Card
+                key={b.id}
+                className="p-4 relative overflow-visible transition-all hover:border-slate-700"
+              >
                 {isOver && !isEditing && (
                   <div className="absolute -top-2 -right-2 group z-10">
                     <div className="bg-red-500 text-white p-1.5 rounded-full shadow-lg border-2 border-slate-900 animate-bounce cursor-help">
@@ -1533,14 +1718,19 @@ export default function FinanceApp() {
                   <div>
                     <h3 className="text-white font-bold text-lg">{b.name}</h3>
                     <p
-                      className={`text-xs ${isOver
-                        ? "text-red-400 font-bold"
-                        : isNearLimit
+                      className={`text-xs ${
+                        isOver
+                          ? "text-red-400 font-bold"
+                          : isNearLimit
                           ? "text-yellow-400"
                           : "text-slate-400"
-                        }`}
+                      }`}
                     >
-                      {isOver ? "Excedido" : isNearLimit ? "Cerca del límite" : "En orden"}
+                      {isOver
+                        ? "Excedido"
+                        : isNearLimit
+                        ? "Cerca del límite"
+                        : "En orden"}
                     </p>
                   </div>
 
@@ -1550,19 +1740,21 @@ export default function FinanceApp() {
                         <input
                           autoFocus
                           type="number"
-                          className="w-20 bg-slate-800 border border-slate-600 text-white px-2 py-1 rounded text-sm text-right"
+                          className="w-24 bg-slate-800 border border-slate-600 text-white px-2 py-1 rounded text-sm text-right"
                           value={editAmount}
                           onChange={(e) => setEditAmount(e.target.value)}
                         />
                         <button
                           onClick={() => saveEdit(b.id)}
                           className="p-1 bg-green-500 text-white rounded hover:bg-green-600"
+                          title="Guardar"
                         >
                           <Save size={14} />
                         </button>
                         <button
                           onClick={() => setEditingId(null)}
                           className="p-1 bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
+                          title="Cancelar"
                         >
                           <X size={14} />
                         </button>
@@ -1571,19 +1763,21 @@ export default function FinanceApp() {
                       <div className="flex items-center gap-2 group">
                         <div>
                           <span
-                            className={`text-sm font-mono ${isOver ? "text-red-400 font-bold" : "text-slate-300"
-                              }`}
+                            className={`text-sm font-mono ${
+                              isOver ? "text-red-400 font-bold" : "text-slate-300"
+                            }`}
                           >
-                            {formatCurrency(b.spent)}
+                            {formatCurrency(b.spent, currentUser.config.currency)}
                           </span>
                           <span className="text-slate-500 text-xs">
                             {" "}
-                            / {formatCurrency(b.limit)}
+                            / {formatCurrency(b.limit, currentUser.config.currency)}
                           </span>
                         </div>
                         <button
                           onClick={() => startEditing(b)}
                           className="text-slate-600 hover:text-yellow-400 transition-colors p-1"
+                          title="Editar límite"
                         >
                           <Pencil size={12} />
                         </button>
@@ -1596,14 +1790,6 @@ export default function FinanceApp() {
               </Card>
             );
           })}
-
-          <button
-            onClick={() => setIsCategoryModalOpen(true)}
-            className="w-full py-4 border-2 border-dashed border-slate-800 rounded-xl text-slate-500 hover:text-yellow-400 hover:border-yellow-400/50 hover:bg-yellow-400/5 transition-all flex items-center justify-center gap-2"
-          >
-            <Plus size={20} />
-            <span>Agregar Nuevo Sobre</span>
-          </button>
         </div>
       </div>
     );
@@ -1614,11 +1800,19 @@ export default function FinanceApp() {
 
     return (
       <div className="space-y-6 pb-24">
-        <h1 className="text-2xl font-bold text-white">Gastos Fijos & Servicios</h1>
-        <p className="text-slate-400 text-sm -mt-4">
-          Controla pagos como Gasolina, Luz o Renta.
-        </p>
-        <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg flex gap-2 items-start text-xs text-blue-300 mb-2">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Gastos Fijos & Servicios</h1>
+            <p className="text-slate-400 text-sm">
+              Controla pagos como Gasolina, Luz o Renta.
+            </p>
+          </div>
+          <Button onClick={() => setIsRecurringModalOpen(true)} className="h-10 px-3">
+            <Plus size={18} /> Nuevo
+          </Button>
+        </div>
+
+        <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg flex gap-2 items-start text-xs text-blue-300">
           <Info size={14} className="mt-0.5 shrink-0" />
           <p>
             Los gastos se reinician automáticamente después de su día de corte mensual,
@@ -1634,13 +1828,15 @@ export default function FinanceApp() {
           )}
 
           {currentUser.recurring.map((r) => {
-            const isFull = r.spent >= r.amount;
+            const isFull = r.spent >= r.amount && r.amount > 0;
+
             return (
               <Card key={r.id} className="p-4 relative">
                 <div className="absolute top-2 right-2 flex gap-2">
                   <button
                     onClick={() => setHistoryRecurring(r)}
                     className="p-1.5 text-slate-500 hover:text-blue-400 rounded hover:bg-slate-800"
+                    title="Historial"
                   >
                     <History size={14} />
                   </button>
@@ -1650,6 +1846,7 @@ export default function FinanceApp() {
                       setIsConfirmingDelete(false);
                     }}
                     className="p-1.5 text-slate-500 hover:text-white rounded hover:bg-slate-800"
+                    title="Editar"
                   >
                     <Pencil size={14} />
                   </button>
@@ -1658,21 +1855,26 @@ export default function FinanceApp() {
                 <div className="flex justify-between items-start mb-2 pr-16">
                   <div className="flex gap-3">
                     <div
-                      className={`p-2 rounded-lg h-fit ${isFull ? "bg-green-500/10 text-green-500" : "bg-slate-800 text-slate-400"
-                        }`}
+                      className={`p-2 rounded-lg h-fit ${
+                        isFull
+                          ? "bg-green-500/10 text-green-500"
+                          : "bg-slate-800 text-slate-400"
+                      }`}
                     >
                       {isFull ? <Check size={20} /> : <Zap size={20} />}
                     </div>
                     <div>
                       <h3 className="text-white font-bold">{r.name}</h3>
-                      <p className="text-xs text-slate-400">Vence día {r.dayOfMonth}</p>
+                      <p className="text-xs text-slate-400">Corte día {r.dayOfMonth}</p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-white font-mono font-bold">
-                      {formatCurrency(r.spent)}
+                      {formatCurrency(r.spent, currentUser.config.currency)}
                     </p>
-                    <p className="text-xs text-slate-500">de {formatCurrency(r.amount)}</p>
+                    <p className="text-xs text-slate-500">
+                      de {formatCurrency(r.amount, currentUser.config.currency)}
+                    </p>
                   </div>
                 </div>
 
@@ -1680,14 +1882,25 @@ export default function FinanceApp() {
 
                 <div className="mt-3 flex justify-between items-center">
                   <p
-                    className={`text-xs font-bold ${isFull ? "text-green-500" : r.spent > r.amount ? "text-red-500" : "text-slate-500"
-                      }`}
+                    className={`text-xs font-bold ${
+                      isFull
+                        ? r.spent > r.amount
+                          ? "text-red-500"
+                          : "text-green-500"
+                        : "text-slate-500"
+                    }`}
                   >
                     {isFull
                       ? r.spent > r.amount
-                        ? `Excedido por ${formatCurrency(r.spent - r.amount)}`
+                        ? `Excedido por ${formatCurrency(
+                            r.spent - r.amount,
+                            currentUser.config.currency
+                          )}`
                         : "Completado"
-                      : `Restan ${formatCurrency(r.amount - r.spent)}`}
+                      : `Restan ${formatCurrency(
+                          r.amount - r.spent,
+                          currentUser.config.currency
+                        )}`}
                   </p>
 
                   <button
@@ -1700,19 +1913,10 @@ export default function FinanceApp() {
               </Card>
             );
           })}
-
-          <button
-            onClick={() => setIsRecurringModalOpen(true)}
-            className="w-full py-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center justify-center gap-2 mt-4"
-          >
-            <Plus size={16} />
-            <span>Agregar Nuevo Gasto Fijo</span>
-          </button>
         </div>
       </div>
     );
   };
-
 
   const GoalsView = () => {
     if (!currentUser) return null;
@@ -1805,17 +2009,14 @@ export default function FinanceApp() {
 
                   <div className="mt-3">
                     <div className="flex justify-between text-xs text-slate-400 mb-2">
-                      <span>
-                        {formatCurrency(g.currentAmount, currentUser.config.currency)}
-                      </span>
-                      <span>
-                        Meta: {formatCurrency(g.targetAmount, currentUser.config.currency)}
-                      </span>
+                      <span>{formatCurrency(g.currentAmount, currentUser.config.currency)}</span>
+                      <span>Meta: {formatCurrency(g.targetAmount, currentUser.config.currency)}</span>
                     </div>
 
                     <ProgressBar value={g.currentAmount} max={max} isGoal />
                     <p className="text-[10px] text-slate-500 mt-2">
-                      Progreso: <span className="text-slate-300 font-bold">{pct.toFixed(0)}%</span>
+                      Progreso:{" "}
+                      <span className="text-slate-300 font-bold">{pct.toFixed(0)}%</span>
                     </p>
                   </div>
                 </Card>
@@ -1827,19 +2028,61 @@ export default function FinanceApp() {
     );
   };
 
-
   const AlertsView = () => {
     if (!currentUser) return null;
+
+    const overBudgets = currentUser.budgets.filter((b) => b.spent > b.limit);
+    const nearBudgets = currentUser.budgets.filter((b) => b.spent / (b.limit || 1) > 0.85 && b.spent <= b.limit);
+    const unpaidRecurring = currentUser.recurring.filter((r) => (r.amount || 0) > 0 && (r.spent || 0) < (r.amount || 0));
+
     return (
       <div className="space-y-4 pb-24">
         <h1 className="text-2xl font-bold text-white">Alertas</h1>
-        <p className="text-slate-400 text-sm">
-          Aquí se mostrarán avisos por sobres excedidos, pagos fijos, etc.
-        </p>
+        <p className="text-slate-400 text-sm">Avisos por sobres y pagos.</p>
 
-        <Card className="p-4">
-          <p className="text-slate-300 text-sm">Sin alertas por ahora.</p>
-        </Card>
+        {overBudgets.length === 0 && nearBudgets.length === 0 && unpaidRecurring.length === 0 ? (
+          <Card className="p-4">
+            <p className="text-slate-300 text-sm">Sin alertas por ahora.</p>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {overBudgets.map((b) => (
+              <Card key={b.id} className="p-4 border-red-500/30">
+                <p className="text-red-400 font-bold text-sm">Sobre excedido: {b.name}</p>
+                <p className="text-slate-300 text-xs mt-1">
+                  Excedido por{" "}
+                  <b className="text-white">
+                    {formatCurrency(b.spent - b.limit, currentUser.config.currency)}
+                  </b>
+                </p>
+              </Card>
+            ))}
+
+            {nearBudgets.map((b) => (
+              <Card key={b.id} className="p-4 border-yellow-400/30">
+                <p className="text-yellow-400 font-bold text-sm">Cerca del límite: {b.name}</p>
+                <p className="text-slate-300 text-xs mt-1">
+                  Te queda{" "}
+                  <b className="text-white">
+                    {formatCurrency(b.limit - b.spent, currentUser.config.currency)}
+                  </b>
+                </p>
+              </Card>
+            ))}
+
+            {unpaidRecurring.map((r) => (
+              <Card key={r.id} className="p-4 border-blue-500/30">
+                <p className="text-blue-300 font-bold text-sm">Pago pendiente: {r.name}</p>
+                <p className="text-slate-300 text-xs mt-1">
+                  Restan{" "}
+                  <b className="text-white">
+                    {formatCurrency(r.amount - r.spent, currentUser.config.currency)}
+                  </b>
+                </p>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -1847,33 +2090,228 @@ export default function FinanceApp() {
   const ReportsView = () => {
     if (!currentUser) return null;
 
-    const expenses = currentUser.transactions.filter((t) => t.type === "expense");
+    const currency = currentUser.config.currency;
+
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - 6); // últimos 7 días
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    const minDate = useMemo(() => {
+      if (generalChartFilter === "week") return startOfWeek;
+      if (generalChartFilter === "month") return startOfMonth;
+      return startOfYear;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [generalChartFilter]);
+
+    const txFiltered = currentUser.transactions.filter((t) => {
+      const d = new Date(t.date);
+      return d >= minDate && d <= now;
+    });
+
+    const expenses = txFiltered.filter((t) => t.type === "expense");
+    const incomes = txFiltered.filter((t) => t.type === "income");
+
     const totalExpenses = expenses.reduce((s, t) => s + t.amount, 0);
-    const totalIncomeExtra = currentUser.transactions
-      .filter((t) => t.type === "income")
-      .reduce((s, t) => s + t.amount, 0);
+    const totalIncomeExtra = incomes.reduce((s, t) => s + t.amount, 0);
+
+    const fixedSpent = currentUser.recurring.reduce((s, r) => s + (r.spent || 0), 0);
+    const fixedLimit = currentUser.recurring.reduce((s, r) => s + (r.amount || 0), 0);
+
+    const available =
+      currentUser.config.monthlyIncome + totalIncomeExtra - fixedSpent - totalExpenses;
+
+    // Pie: gastos por categoría (variables)
+    const categoryMap = new Map<string, number>();
+    for (const e of expenses) {
+      categoryMap.set(e.category, (categoryMap.get(e.category) || 0) + e.amount);
+    }
+    const pieData = Array.from(categoryMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+
+    // Barra: top categorías vs límite (si existe en budgets)
+    const budgetByName = new Map(currentUser.budgets.map((b) => [b.name, b]));
+    const barBudget = currentUser.budgets
+      .map((b) => ({
+        name: b.name,
+        spent: b.spent,
+        limit: b.limit,
+      }))
+      .sort((a, b) => (b.spent / (b.limit || 1)) - (a.spent / (a.limit || 1)))
+      .slice(0, 7);
+
+    // Serie: gastos diarios (variables)
+    const daily = new Map<string, { date: string; expenses: number; incomes: number }>();
+    const toKey = (d: Date) => d.toISOString().slice(0, 10);
+
+    for (const t of txFiltered) {
+      const key = t.date || toKey(new Date());
+      const cur = daily.get(key) || { date: key, expenses: 0, incomes: 0 };
+      if (t.type === "expense") cur.expenses += t.amount;
+      else cur.incomes += t.amount;
+      daily.set(key, cur);
+    }
+
+    const trendData = Array.from(daily.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-60);
 
     return (
       <div className="space-y-4 pb-24">
-        <h1 className="text-2xl font-bold text-white">Análisis</h1>
-        <p className="text-slate-400 text-sm">
-          Resumen rápido (pendiente de gráficas completas).
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Análisis</h1>
+            <p className="text-slate-400 text-sm">Resumen + gráficas.</p>
+          </div>
+
+          <select
+            className="bg-slate-950 border border-slate-800 text-white rounded-lg px-3 py-2 text-sm"
+            value={generalChartFilter}
+            onChange={(e) => setGeneralChartFilter(e.target.value as TimeFilter)}
+            title="Filtro"
+          >
+            <option value="week">7 días</option>
+            <option value="month">Este mes</option>
+            <option value="year">Este año</option>
+          </select>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <Card className="p-4">
-            <p className="text-slate-400 text-xs">Gastos</p>
-            <p className="text-white font-bold">{formatCurrency(totalExpenses, currentUser.config.currency)}</p>
+            <p className="text-slate-400 text-xs">Gastos (variables)</p>
+            <p className="text-white font-bold">
+              {formatCurrency(totalExpenses, currency)}
+            </p>
           </Card>
           <Card className="p-4">
             <p className="text-slate-400 text-xs">Ingresos extra</p>
-            <p className="text-white font-bold">{formatCurrency(totalIncomeExtra, currentUser.config.currency)}</p>
+            <p className="text-white font-bold">
+              {formatCurrency(totalIncomeExtra, currency)}
+            </p>
+          </Card>
+
+          <Card className="p-4">
+            <p className="text-slate-400 text-xs">Fijos pagados</p>
+            <p className="text-white font-bold">
+              {formatCurrency(fixedSpent, currency)}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Tope total: {formatCurrency(fixedLimit, currency)}
+            </p>
+          </Card>
+
+          <Card className="p-4">
+            <p className="text-slate-400 text-xs">Disponible (estimado)</p>
+            <p className="text-white font-bold">
+              {formatCurrency(available, currency)}
+            </p>
           </Card>
         </div>
 
         <Card className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-white font-bold">Gasto por categoría</p>
+            <p className="text-xs text-slate-500">
+              Top {pieData.length}
+            </p>
+          </div>
+
+          <div style={{ width: "100%", height: 220 }}>
+            {pieData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                Aún no hay gastos en este periodo.
+              </div>
+            ) : (
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={2}
+                  >
+                    {pieData.map((_, idx) => (
+                      <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Legend />
+                  <RechartsTooltip
+                    formatter={(v: any) => formatCurrency(Number(v), currency)}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <p className="text-white font-bold mb-2">Sobres: gasto vs límite</p>
+
+          <div style={{ width: "100%", height: 260 }}>
+            {barBudget.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                No hay sobres configurados.
+              </div>
+            ) : (
+              <ResponsiveContainer>
+                <BarChart data={barBudget}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <RechartsTooltip
+                    formatter={(v: any, name: any) => {
+                      if (name === "spent") return [formatCurrency(Number(v), currency), "Gastado"];
+                      return [formatCurrency(Number(v), currency), "Límite"];
+                    }}
+                  />
+                  <Legend />
+                  <Bar dataKey="limit" />
+                  <Bar dataKey="spent" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <p className="text-white font-bold mb-2">Tendencia (ingresos vs gastos)</p>
+
+          <div style={{ width: "100%", height: 260 }}>
+            {trendData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                Sin datos para graficar.
+              </div>
+            ) : (
+              <ResponsiveContainer>
+                <AreaChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <RechartsTooltip
+                    formatter={(v: any) => formatCurrency(Number(v), currency)}
+                  />
+                  <Legend />
+                  <Area type="monotone" dataKey="incomes" />
+                  <Area type="monotone" dataKey="expenses" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-4">
           <p className="text-slate-300 text-sm">
-            Movimientos: <span className="text-white font-bold">{currentUser.transactions.length}</span>
+            Movimientos en periodo:{" "}
+            <span className="text-white font-bold">{txFiltered.length}</span>
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Nota: Los “fijos” se toman de tu pantalla de Fijos (acumulado actual), no de movimientos diarios.
           </p>
         </Card>
       </div>
@@ -1883,37 +2321,112 @@ export default function FinanceApp() {
   const SettingsView = () => {
     if (!currentUser) return null;
 
+    const [name, setName] = useState(currentUser.config.name || "");
+    const [income, setIncome] = useState(String(currentUser.config.monthlyIncome || ""));
+    const [currency, setCurrency] = useState(currentUser.config.currency || "MXN");
+    const [savings, setSavings] = useState(String(currentUser.config.savingsRulePercent ?? 10));
+    const [saving, setSaving] = useState(false);
+
+    const save = async () => {
+      const parsedIncome = Number(income);
+      const parsedSavings = Number(savings);
+
+      const updated: UserProfile = {
+        ...currentUser,
+        config: {
+          ...currentUser.config,
+          name: name.trim() || "Usuario",
+          monthlyIncome: Number.isFinite(parsedIncome) ? parsedIncome : 0,
+          currency: currency || "MXN",
+          savingsRulePercent: Number.isFinite(parsedSavings) ? parsedSavings : 10,
+        },
+      };
+
+      setSaving(true);
+      await saveUserToDb(updated);
+      setSaving(false);
+      setView("dashboard");
+    };
+
     return (
       <div className="space-y-4 pb-24">
-        <h1 className="text-2xl font-bold text-white">Ajustes</h1>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Ajustes</h1>
+            <p className="text-slate-400 text-sm">Tu configuración principal.</p>
+          </div>
+        </div>
 
         <Card className="p-4 space-y-3">
           <div>
-            <p className="text-slate-400 text-xs">Usuario</p>
-            <p className="text-white font-bold">{currentUser.config.name}</p>
+            <Label>Nombre</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setView("dashboard")}>
+          <div>
+            <Label>Ingreso mensual</Label>
+            <Input
+              inputMode="decimal"
+              value={income}
+              onKeyDown={preventInvalidNumberKeys}
+              onChange={(e) => setIncome(sanitizeAmount(e.target.value))}
+            />
+          </div>
+
+          <div>
+            <Label>Moneda</Label>
+            <select
+              className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg px-4 py-3"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+            >
+              <option value="MXN">MXN</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </div>
+
+          <div>
+            <Label>% ahorro sugerido</Label>
+            <Input
+              inputMode="decimal"
+              value={savings}
+              onKeyDown={preventInvalidNumberKeys}
+              onChange={(e) => setSavings(sanitizeAmount(e.target.value))}
+              placeholder="Ej: 10"
+            />
+            <p className="text-[10px] text-slate-500 mt-1">
+              Solo es una regla sugerida (no mueve dinero automáticamente).
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setView("dashboard")}
+              disabled={saving}
+            >
               Volver
             </Button>
-            <Button variant="danger" className="flex-1" onClick={handleLogout}>
-              <LogOut size={18} /> Salir
+            <Button className="flex-1" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+              Guardar
             </Button>
           </div>
+        </Card>
+
+        <Card className="p-4 space-y-3">
+          <p className="text-slate-400 text-xs">Sesión</p>
+          <Button variant="danger" onClick={handleLogout}>
+            <LogOut size={18} /> Salir
+          </Button>
         </Card>
       </div>
     );
   };
 
-
-
-
-  // (Para no hacer la respuesta infinita, mantuve Reports/Goals/Alerts/Settings igual a lo que ya traías,
-  // pero tu build y modales de sobres/fijos ya quedan funcionando y TS pasa en CI.)
-  // Si quieres, en el siguiente mensaje te pego Reports/Goals/Alerts/Settings completos también.
-
-  // --- RENDER MAIN ---
+  // --- MAIN RENDER STATES ---
   if (loadingAuth || loadingData) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
@@ -1927,215 +2440,389 @@ export default function FinanceApp() {
   if (view === "onboarding") return <OnboardingWizard />;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-yellow-400/30">
-      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-yellow-400/30">
+        {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
 
-      <div className="max-w-md mx-auto min-h-screen bg-slate-950 shadow-2xl relative">
-        <main className="p-4 pt-8">
-          {view === "dashboard" && <Dashboard />} 
-          {view === "budget" && <BudgetView />}
-          {view === "recurring" && <RecurringView />}
-          {view === "goals" && <GoalsView />}
-          {view === "alerts" && <AlertsView />}
-          {view === "reports" && <ReportsView />}
-          {view === "settings" && <SettingsView />}
-        </main>
+        <div className="max-w-md mx-auto min-h-screen bg-slate-950 shadow-2xl relative">
+          <main className="p-4 pt-8">
+            {view === "dashboard" && <Dashboard />}
+            {view === "budget" && <BudgetView />}
+            {view === "recurring" && <RecurringView />}
+            {view === "goals" && <GoalsView />}
+            {view === "alerts" && <AlertsView />}
+            {view === "reports" && <ReportsView />}
+            {view === "settings" && <SettingsView />}
+          </main>
 
-        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 safe-area-bottom">
-          <div className="max-w-md mx-auto flex justify-around items-center h-16 px-2">
-            <button
-              onClick={() => setView("dashboard")}
-              className={`flex flex-col items-center gap-1 p-2 ${view === "dashboard" ? "text-yellow-400" : "text-slate-500"
-                }`}
-            >
-              <Home size={20} />
-              <span className="text-[10px]">Inicio</span>
-            </button>
-
-            <button
-              onClick={() => setView("budget")}
-              className={`flex flex-col items-center gap-1 p-2 ${view === "budget" ? "text-yellow-400" : "text-slate-500"
-                }`}
-            >
-              <Wallet size={20} />
-              <span className="text-[10px]">Sobres</span>
-            </button>
-
-            <div className="relative -top-5">
+          <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 safe-area-bottom">
+            <div className="max-w-md mx-auto flex justify-around items-center h-16 px-2">
               <button
-                onClick={() => setIsModalOpen(true)}
-                className="w-14 h-14 rounded-full bg-yellow-400 text-slate-950 flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-transform"
+                onClick={() => setView("dashboard")}
+                className={`flex flex-col items-center gap-1 p-2 ${
+                  view === "dashboard" ? "text-yellow-400" : "text-slate-500"
+                }`}
               >
-                <Plus size={28} strokeWidth={3} />
+                <Home size={20} />
+                <span className="text-[10px]">Inicio</span>
               </button>
-            </div>
 
-            <button
-              onClick={() => setView("recurring")}
-              className={`flex flex-col items-center gap-1 p-2 ${view === "recurring" ? "text-yellow-400" : "text-slate-500"
+              <button
+                onClick={() => setView("budget")}
+                className={`flex flex-col items-center gap-1 p-2 ${
+                  view === "budget" ? "text-yellow-400" : "text-slate-500"
                 }`}
-            >
-              <Zap size={20} />
-              <span className="text-[10px]">Fijos</span>
-            </button>
+              >
+                <Wallet size={20} />
+                <span className="text-[10px]">Sobres</span>
+              </button>
 
-            <button
-              onClick={() => setView("reports")}
-              className={`flex flex-col items-center gap-1 p-2 ${view === "reports" ? "text-yellow-400" : "text-slate-500"
-                }`}
-            >
-              <TrendingUp size={20} />
-              <span className="text-[10px]">Análisis</span>
-            </button>
-          </div>
-        </nav>
-
-        {isModalOpen && <AddTransactionModal />}
-        {isCategoryModalOpen && <AddCategoryModal />}
-        {isRecurringModalOpen && <AddRecurringModal />}
-
-        {isGoalModalOpen && <AddGoalModal />}
-
-        {goalDepositId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
-              <h2 className="text-lg font-bold text-white">Abonar a meta</h2>
-
-              <Input
-                autoFocus
-                inputMode="decimal"
-                placeholder="Monto ($)"
-                value={goalDepositAmount}
-                onKeyDown={preventInvalidNumberKeys}
-                onChange={(e) => setGoalDepositAmount(sanitizeAmount(e.target.value))}
-              />
-
-              <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setGoalDepositId(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={() => {
-                    const n = Number(goalDepositAmount);
-                    if (Number.isFinite(n) && n > 0) addGoalDeposit(goalDepositId, n);
-                  }}
+              <div className="relative -top-5">
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="w-14 h-14 rounded-full bg-yellow-400 text-slate-950 flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-transform"
+                  title="Nuevo movimiento"
                 >
-                  Abonar
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {editingGoal && !isConfirmingDeleteGoal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-white">Editar meta</h2>
-                <button onClick={() => setEditingGoal(null)} className="text-slate-400 hover:text-white">
-                  <X size={20} />
+                  <Plus size={28} strokeWidth={3} />
                 </button>
               </div>
 
-              <div>
-                <Label>Nombre</Label>
-                <Input
-                  value={editingGoal.name}
-                  onChange={(e) => setEditingGoal({ ...editingGoal, name: e.target.value })}
-                />
-              </div>
+              <button
+                onClick={() => setView("recurring")}
+                className={`flex flex-col items-center gap-1 p-2 ${
+                  view === "recurring" ? "text-yellow-400" : "text-slate-500"
+                }`}
+              >
+                <Zap size={20} />
+                <span className="text-[10px]">Fijos</span>
+              </button>
 
-              <div>
-                <Label>Monto meta</Label>
+              <button
+                onClick={() => setView("reports")}
+                className={`flex flex-col items-center gap-1 p-2 ${
+                  view === "reports" ? "text-yellow-400" : "text-slate-500"
+                }`}
+              >
+                <TrendingUp size={20} />
+                <span className="text-[10px]">Análisis</span>
+              </button>
+            </div>
+          </nav>
+
+          {isModalOpen && <AddTransactionModal />}
+          {isCategoryModalOpen && <AddCategoryModal />}
+          {isRecurringModalOpen && <AddRecurringModal />}
+          {isGoalModalOpen && <AddGoalModal />}
+
+          {/* Modal: Abonar a meta */}
+          {goalDepositId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <h2 className="text-lg font-bold text-white">Abonar a meta</h2>
+
                 <Input
+                  autoFocus
                   inputMode="decimal"
-                  value={String(editingGoal.targetAmount ?? "")}
+                  placeholder="Monto ($)"
+                  value={goalDepositAmount}
                   onKeyDown={preventInvalidNumberKeys}
-                  onChange={(e) =>
-                    setEditingGoal({ ...editingGoal, targetAmount: Number(sanitizeAmount(e.target.value)) })
-                  }
+                  onChange={(e) => setGoalDepositAmount(sanitizeAmount(e.target.value))}
                 />
-              </div>
 
-              <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setEditingGoal(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={() => editGoal(editingGoal.id, editingGoal.name.trim(), Number(editingGoal.targetAmount))}
-                >
-                  Guardar
-                </Button>
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setGoalDepositId(null)}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      const n = Number(goalDepositAmount);
+                      if (Number.isFinite(n) && n > 0) addGoalDeposit(goalDepositId, n);
+                    }}
+                  >
+                    Abonar
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {editingGoal && isConfirmingDeleteGoal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
-              <h2 className="text-lg font-bold text-white">¿Eliminar meta?</h2>
-              <p className="text-slate-400 text-sm">
-                Se eliminará <b className="text-white">{editingGoal.name}</b>. Esta acción no se puede deshacer.
-              </p>
+          {/* Modal: Editar meta */}
+          {editingGoal && !isConfirmingDeleteGoal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-white">Editar meta</h2>
+                  <button onClick={() => setEditingGoal(null)} className="text-slate-400 hover:text-white">
+                    <X size={20} />
+                  </button>
+                </div>
 
-              <div className="flex gap-2 pt-2">
-                <Button
-                  variant="secondary"
-                  className="flex-1"
-                  onClick={() => {
-                    setIsConfirmingDeleteGoal(false);
-                    setEditingGoal(null);
-                  }}
-                >
-                  Cancelar
-                </Button>
+                <div>
+                  <Label>Nombre</Label>
+                  <Input
+                    value={editingGoal.name}
+                    onChange={(e) => setEditingGoal({ ...editingGoal, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <Label>Monto meta</Label>
+                  <Input
+                    inputMode="decimal"
+                    value={String(editingGoal.targetAmount ?? "")}
+                    onKeyDown={preventInvalidNumberKeys}
+                    onChange={(e) =>
+                      setEditingGoal({
+                        ...editingGoal,
+                        targetAmount: Number(sanitizeAmount(e.target.value)),
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setEditingGoal(null)}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={() =>
+                      editGoal(
+                        editingGoal.id,
+                        editingGoal.name.trim(),
+                        Number(editingGoal.targetAmount)
+                      )
+                    }
+                  >
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Confirmar eliminar meta */}
+          {editingGoal && isConfirmingDeleteGoal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <h2 className="text-lg font-bold text-white">¿Eliminar meta?</h2>
+                <p className="text-slate-400 text-sm">
+                  Se eliminará <b className="text-white">{editingGoal.name}</b>. Esta acción no se puede deshacer.
+                </p>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => {
+                      setIsConfirmingDeleteGoal(false);
+                      setEditingGoal(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button variant="danger" className="flex-1" onClick={() => deleteGoal(editingGoal.id)}>
+                    Eliminar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Pago parcial gasto fijo */}
+          {payRecurringId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <h2 className="text-lg font-bold text-white">Registrar Pago</h2>
+                <Input
+                  autoFocus
+                  inputMode="decimal"
+                  placeholder="Monto ($)"
+                  value={payRecurringAmount}
+                  onKeyDown={preventInvalidNumberKeys}
+                  onChange={(e) => setPayRecurringAmount(sanitizeAmount(e.target.value))}
+                />
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setPayRecurringId(null)}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      const n = Number(payRecurringAmount);
+                      if (Number.isFinite(n) && n > 0) addRecurringPayment(payRecurringId, n);
+                    }}
+                  >
+                    Registrar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Editar gasto fijo */}
+          {editingRecurring && !isConfirmingDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-white">Editar gasto fijo</h2>
+                  <button onClick={() => setEditingRecurring(null)} className="text-slate-400 hover:text-white">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div>
+                  <Label>Nombre</Label>
+                  <Input
+                    value={editingRecurring.name}
+                    onChange={(e) => setEditingRecurring({ ...editingRecurring, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <Label>Tope / Presupuesto</Label>
+                  <Input
+                    inputMode="decimal"
+                    value={String(editingRecurring.amount)}
+                    onKeyDown={preventInvalidNumberKeys}
+                    onChange={(e) =>
+                      setEditingRecurring({ ...editingRecurring, amount: Number(sanitizeAmount(e.target.value)) })
+                    }
+                  />
+                </div>
+
+                <div>
+                  <Label>Día de corte (1-31)</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={String(editingRecurring.dayOfMonth)}
+                    onChange={(e) =>
+                      setEditingRecurring({ ...editingRecurring, dayOfMonth: Number(sanitizeAmount(e.target.value)) })
+                    }
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setEditingRecurring(null)}>
+                    Cancelar
+                  </Button>
+
+                  <Button
+                    className="flex-1"
+                    onClick={() =>
+                      editRecurringExpense(
+                        editingRecurring.id,
+                        editingRecurring.name.trim(),
+                        Number(editingRecurring.amount),
+                        Number(editingRecurring.dayOfMonth)
+                      )
+                    }
+                  >
+                    Guardar
+                  </Button>
+                </div>
+
                 <Button
                   variant="danger"
-                  className="flex-1"
-                  onClick={() => deleteGoal(editingGoal.id)}
+                  className="w-full"
+                  onClick={() => setIsConfirmingDelete(true)}
                 >
-                  Eliminar
+                  <Trash2 size={18} /> Eliminar
                 </Button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
+          {/* Modal: Confirmar eliminar gasto fijo */}
+          {editingRecurring && isConfirmingDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <h2 className="text-lg font-bold text-white">¿Eliminar gasto fijo?</h2>
+                <p className="text-slate-400 text-sm">
+                  Se eliminará <b className="text-white">{editingRecurring.name}</b>. Esta acción no se puede deshacer.
+                </p>
 
-        {/* Modal Pago Parcial Gasto Fijo */}
-        {payRecurringId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
-              <h2 className="text-lg font-bold text-white">Registrar Pago</h2>
-              <Input
-                autoFocus
-                inputMode="decimal"
-                placeholder="Monto ($)"
-                value={payRecurringAmount}
-                onKeyDown={preventInvalidNumberKeys}
-                onChange={(e) => setPayRecurringAmount(sanitizeAmount(e.target.value))}
-              />
-              <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setPayRecurringId(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={() => {
-                    const n = Number(payRecurringAmount);
-                    if (Number.isFinite(n) && n > 0) addRecurringPayment(payRecurringId, n);
-                  }}
-                >
-                  Registrar
-                </Button>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => {
+                      setIsConfirmingDelete(false);
+                      setEditingRecurring(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    onClick={() => deleteRecurringExpense(editingRecurring.id)}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Modal: Historial gasto fijo */}
+          {historyRecurring && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-white">
+                    Historial: {historyRecurring.name}
+                  </h2>
+                  <button onClick={() => setHistoryRecurring(null)} className="text-slate-400 hover:text-white">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {(historyRecurring.history || []).length === 0 ? (
+                    <div className="text-slate-500 text-sm">
+                      Aún no hay historial guardado. Se agrega cuando reinicia el mes.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-auto pr-1">
+                      {(historyRecurring.history || [])
+                        .slice()
+                        .reverse()
+                        .map((h, idx) => (
+                          <div key={idx} className="flex justify-between text-sm bg-slate-950 border border-slate-800 rounded-lg p-3">
+                            <span className="text-slate-300">{h.month}</span>
+                            <span className="text-white font-mono">
+                              {formatCurrency(h.spent, currentUser.config.currency)} / {formatCurrency(h.limit, currentUser.config.currency)}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ width: "100%", height: 220 }}>
+                  {(historyRecurring.history || []).length > 0 && (
+                    <ResponsiveContainer>
+                      <BarChart data={(historyRecurring.history || []).slice(-8)}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <RechartsTooltip
+                          formatter={(v: any) => formatCurrency(Number(v), currentUser.config.currency)}
+                        />
+                        <Legend />
+                        <Bar dataKey="limit" />
+                        <Bar dataKey="spent" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }
