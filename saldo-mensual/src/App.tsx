@@ -1932,7 +1932,7 @@ export default function FinanceApp() {
 
       <div className="max-w-md mx-auto min-h-screen bg-slate-950 shadow-2xl relative">
         <main className="p-4 pt-8">
-          {view === "dashboard" && <Dashboard />}
+          {view === "dashboard" && <Dashboard />} 
           {view === "budget" && <BudgetView />}
           {view === "recurring" && <RecurringView />}
           {view === "goals" && <GoalsView />}
