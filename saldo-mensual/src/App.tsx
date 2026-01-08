@@ -478,49 +478,73 @@ export default function FinanceApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const normalizeProfile = (raw: any, uid: string): UserProfile => {
+    const cfg = raw?.config ?? {};
+
+    return {
+      id: uid,
+      config: {
+        hasCompletedOnboarding: Boolean(cfg.hasCompletedOnboarding),
+        name: cfg.name ?? "Usuario",
+        avatar: cfg.avatar ?? undefined,
+        monthlyIncome: Number(cfg.monthlyIncome ?? 0),
+        payFrequency: (cfg.payFrequency ?? "quincenal") as Frequency,
+        currency: cfg.currency ?? "MXN",
+        savingsRulePercent: Number(cfg.savingsRulePercent ?? 10),
+      },
+      transactions: Array.isArray(raw?.transactions) ? raw.transactions : [],
+      recurring: Array.isArray(raw?.recurring) ? raw.recurring : [],
+      budgets: Array.isArray(raw?.budgets) ? raw.budgets : [],
+      goals: Array.isArray(raw?.goals) ? raw.goals : [],
+    };
+  };
+
+
   const loadUserData = async (firebaseUser: FirebaseUser) => {
     if (!db) return;
     setLoadingData(true);
     try {
       const userDocRef = doc(db, "users", firebaseUser.uid);
 
-      onSnapshot(
-        userDocRef,
-        (docSnap: DocumentSnapshot<DocumentData>) => {
-          if (docSnap.exists()) {
-            let profile = docSnap.data() as UserProfile;
-            profile = checkRecurringResets(profile);
-            setCurrentUser(profile);
+      onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const raw = docSnap.data();
+          let profile = normalizeProfile(raw, firebaseUser.uid);
 
-            if (!profile.config.hasCompletedOnboarding) {
-              setView("onboarding");
-              setShowSplash(false);
-            }
-          } else {
-            const newProfile: UserProfile = {
-              id: firebaseUser.uid,
-              config: {
-                hasCompletedOnboarding: false,
-                name: firebaseUser.displayName || "Usuario",
-                avatar: firebaseUser.photoURL || undefined,
-                monthlyIncome: 0,
-                payFrequency: "quincenal",
-                currency: "MXN",
-                savingsRulePercent: 10,
-              },
-              transactions: [],
-              recurring: [],
-              budgets: [],
-              goals: [],
-            };
-            setDoc(userDocRef, newProfile);
-            setCurrentUser(newProfile);
+          profile = checkRecurringResets(profile);
+          setCurrentUser(profile);
+
+          if (!profile.config.hasCompletedOnboarding) {
             setView("onboarding");
             setShowSplash(false);
           }
-          setLoadingData(false);
+        } else {
+          const newProfile: UserProfile = {
+            id: firebaseUser.uid,
+            config: {
+              hasCompletedOnboarding: false,
+              name: firebaseUser.displayName || "Usuario",
+              avatar: firebaseUser.photoURL || undefined,
+              monthlyIncome: 0,
+              payFrequency: "quincenal",
+              currency: "MXN",
+              savingsRulePercent: 10,
+            },
+            transactions: [],
+            recurring: [],
+            budgets: [],
+            goals: [],
+          };
+
+          setDoc(userDocRef, newProfile);
+          setCurrentUser(newProfile);
+          setView("onboarding");
+          setShowSplash(false);
         }
-      );
+
+        setLoadingData(false);
+      });
+
     } catch (error) {
       console.error("Error loading data:", error);
       setLoadingData(false);
@@ -856,21 +880,19 @@ export default function FinanceApp() {
           <div className="flex gap-2">
             <button
               onClick={() => setType("expense")}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${
-                type === "expense"
-                  ? "bg-red-500/15 border-red-500/30 text-red-300"
-                  : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
-              }`}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${type === "expense"
+                ? "bg-red-500/15 border-red-500/30 text-red-300"
+                : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                }`}
             >
               Gasto
             </button>
             <button
               onClick={() => setType("income")}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${
-                type === "income"
-                  ? "bg-green-500/15 border-green-500/30 text-green-300"
-                  : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
-              }`}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold border ${type === "income"
+                ? "bg-green-500/15 border-green-500/30 text-green-300"
+                : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                }`}
             >
               Ingreso
             </button>
@@ -1422,11 +1444,10 @@ export default function FinanceApp() {
                 >
                   <div className="flex gap-3 items-center">
                     <div
-                      className={`p-2 rounded-full h-fit ${
-                        t.type === "expense"
-                          ? "bg-red-500/10 text-red-500"
-                          : "bg-green-500/10 text-green-500"
-                      }`}
+                      className={`p-2 rounded-full h-fit ${t.type === "expense"
+                        ? "bg-red-500/10 text-red-500"
+                        : "bg-green-500/10 text-green-500"
+                        }`}
                     >
                       {t.type === "expense" ? (
                         <ArrowUpRight size={16} />
@@ -1442,9 +1463,8 @@ export default function FinanceApp() {
                     </div>
                   </div>
                   <span
-                    className={`font-mono font-bold ${
-                      t.type === "expense" ? "text-white" : "text-green-400"
-                    }`}
+                    className={`font-mono font-bold ${t.type === "expense" ? "text-white" : "text-green-400"
+                      }`}
                   >
                     {t.type === "expense" ? "-" : "+"}
                     {formatCurrency(t.amount)}
@@ -1507,13 +1527,12 @@ export default function FinanceApp() {
                   <div>
                     <h3 className="text-white font-bold text-lg">{b.name}</h3>
                     <p
-                      className={`text-xs ${
-                        isOver
-                          ? "text-red-400 font-bold"
-                          : isNearLimit
+                      className={`text-xs ${isOver
+                        ? "text-red-400 font-bold"
+                        : isNearLimit
                           ? "text-yellow-400"
                           : "text-slate-400"
-                      }`}
+                        }`}
                     >
                       {isOver ? "Excedido" : isNearLimit ? "Cerca del límite" : "En orden"}
                     </p>
@@ -1546,9 +1565,8 @@ export default function FinanceApp() {
                       <div className="flex items-center gap-2 group">
                         <div>
                           <span
-                            className={`text-sm font-mono ${
-                              isOver ? "text-red-400 font-bold" : "text-slate-300"
-                            }`}
+                            className={`text-sm font-mono ${isOver ? "text-red-400 font-bold" : "text-slate-300"
+                              }`}
                           >
                             {formatCurrency(b.spent)}
                           </span>
@@ -1634,9 +1652,8 @@ export default function FinanceApp() {
                 <div className="flex justify-between items-start mb-2 pr-16">
                   <div className="flex gap-3">
                     <div
-                      className={`p-2 rounded-lg h-fit ${
-                        isFull ? "bg-green-500/10 text-green-500" : "bg-slate-800 text-slate-400"
-                      }`}
+                      className={`p-2 rounded-lg h-fit ${isFull ? "bg-green-500/10 text-green-500" : "bg-slate-800 text-slate-400"
+                        }`}
                     >
                       {isFull ? <Check size={20} /> : <Zap size={20} />}
                     </div>
@@ -1657,9 +1674,8 @@ export default function FinanceApp() {
 
                 <div className="mt-3 flex justify-between items-center">
                   <p
-                    className={`text-xs font-bold ${
-                      isFull ? "text-green-500" : r.spent > r.amount ? "text-red-500" : "text-slate-500"
-                    }`}
+                    className={`text-xs font-bold ${isFull ? "text-green-500" : r.spent > r.amount ? "text-red-500" : "text-slate-500"
+                      }`}
                   >
                     {isFull
                       ? r.spent > r.amount
@@ -1724,9 +1740,8 @@ export default function FinanceApp() {
           <div className="max-w-md mx-auto flex justify-around items-center h-16 px-2">
             <button
               onClick={() => setView("dashboard")}
-              className={`flex flex-col items-center gap-1 p-2 ${
-                view === "dashboard" ? "text-yellow-400" : "text-slate-500"
-              }`}
+              className={`flex flex-col items-center gap-1 p-2 ${view === "dashboard" ? "text-yellow-400" : "text-slate-500"
+                }`}
             >
               <Home size={20} />
               <span className="text-[10px]">Inicio</span>
@@ -1734,9 +1749,8 @@ export default function FinanceApp() {
 
             <button
               onClick={() => setView("budget")}
-              className={`flex flex-col items-center gap-1 p-2 ${
-                view === "budget" ? "text-yellow-400" : "text-slate-500"
-              }`}
+              className={`flex flex-col items-center gap-1 p-2 ${view === "budget" ? "text-yellow-400" : "text-slate-500"
+                }`}
             >
               <Wallet size={20} />
               <span className="text-[10px]">Sobres</span>
@@ -1753,9 +1767,8 @@ export default function FinanceApp() {
 
             <button
               onClick={() => setView("recurring")}
-              className={`flex flex-col items-center gap-1 p-2 ${
-                view === "recurring" ? "text-yellow-400" : "text-slate-500"
-              }`}
+              className={`flex flex-col items-center gap-1 p-2 ${view === "recurring" ? "text-yellow-400" : "text-slate-500"
+                }`}
             >
               <Zap size={20} />
               <span className="text-[10px]">Fijos</span>
@@ -1763,9 +1776,8 @@ export default function FinanceApp() {
 
             <button
               onClick={() => setView("reports")}
-              className={`flex flex-col items-center gap-1 p-2 ${
-                view === "reports" ? "text-yellow-400" : "text-slate-500"
-              }`}
+              className={`flex flex-col items-center gap-1 p-2 ${view === "reports" ? "text-yellow-400" : "text-slate-500"
+                }`}
             >
               <TrendingUp size={20} />
               <span className="text-[10px]">Análisis</span>
