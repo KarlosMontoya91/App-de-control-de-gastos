@@ -966,19 +966,20 @@ export default function FinanceApp() {
   };
 
   // Modal: Nuevo Sobre
-  const AddCategoryModal = () => {
+  const AddGoalModal = () => {
     const [name, setName] = useState("");
-    const [limit, setLimit] = useState("");
-    const parsed = Number(limit);
-    const valid = name.trim().length >= 2 && Number.isFinite(parsed) && parsed > 0;
+    const [target, setTarget] = useState("");
+
+    const parsedTarget = Number(target);
+    const valid = name.trim().length >= 2 && Number.isFinite(parsedTarget) && parsedTarget > 0;
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
         <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white">Nuevo Sobre</h2>
+            <h2 className="text-lg font-bold text-white">Nueva Meta</h2>
             <button
-              onClick={() => setIsCategoryModalOpen(false)}
+              onClick={() => setIsGoalModalOpen(false)}
               className="text-slate-400 hover:text-white"
             >
               <X size={20} />
@@ -987,25 +988,29 @@ export default function FinanceApp() {
 
           <div>
             <Label>Nombre</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Mascotas" />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: iPhone / Viaje / Fondo" />
           </div>
 
           <div>
-            <Label>Presupuesto</Label>
+            <Label>Monto meta</Label>
             <Input
               inputMode="decimal"
-              value={limit}
+              value={target}
               onKeyDown={preventInvalidNumberKeys}
-              onChange={(e) => setLimit(sanitizeAmount(e.target.value))}
-              placeholder="Ej: 1500"
+              onChange={(e) => setTarget(sanitizeAmount(e.target.value))}
+              placeholder="Ej: 15000"
             />
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setIsCategoryModalOpen(false)}>
+            <Button variant="secondary" className="flex-1" onClick={() => setIsGoalModalOpen(false)}>
               Cancelar
             </Button>
-            <Button className="flex-1" disabled={!valid} onClick={() => addBudgetCategory(name.trim(), parsed)}>
+            <Button
+              className="flex-1"
+              disabled={!valid}
+              onClick={() => addGoal(name.trim(), parsedTarget)}
+            >
               Crear
             </Button>
           </div>
@@ -1013,6 +1018,7 @@ export default function FinanceApp() {
       </div>
     );
   };
+
 
   // Modal: Nuevo Gasto Fijo
   const AddRecurringModal = () => {
@@ -1707,6 +1713,202 @@ export default function FinanceApp() {
     );
   };
 
+
+  const GoalsView = () => {
+    if (!currentUser) return null;
+
+    const safeMax = (n: number) => (Number.isFinite(n) && n > 0 ? n : 1);
+
+    return (
+      <div className="space-y-6 pb-24 animate-in fade-in">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Metas</h1>
+            <p className="text-slate-400 text-sm">
+              Crea metas, abona y monitorea tu progreso.
+            </p>
+          </div>
+
+          <Button onClick={() => setIsGoalModalOpen(true)} className="h-10 px-3">
+            <Plus size={18} />
+            Nueva
+          </Button>
+        </div>
+
+        {currentUser.goals.length === 0 ? (
+          <div className="text-center py-10 text-slate-500 border border-dashed border-slate-800 rounded-xl bg-slate-900/30">
+            Aún no tienes metas. Crea la primera con <b>Nueva</b>.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {currentUser.goals.map((g) => {
+              const max = safeMax(g.targetAmount);
+              const pct = Math.min(100, Math.max(0, (g.currentAmount / max) * 100));
+              const remaining = Math.max(0, g.targetAmount - g.currentAmount);
+              const completed = g.currentAmount >= g.targetAmount && g.targetAmount > 0;
+
+              return (
+                <Card key={g.id} className="p-4">
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="min-w-0">
+                      <h3 className="text-white font-bold truncate">{g.name}</h3>
+
+                      <p className="text-xs text-slate-400 mt-1">
+                        {completed ? (
+                          <span className="text-green-400 font-bold">Meta lograda 🎉</span>
+                        ) : (
+                          <>
+                            Restan{" "}
+                            <span className="text-yellow-400 font-bold">
+                              {formatCurrency(remaining, currentUser.config.currency)}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => {
+                          setGoalDepositId(g.id);
+                          setGoalDepositAmount("");
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-lg flex items-center gap-1 transition-colors"
+                        title="Abonar"
+                      >
+                        <Plus size={12} /> Abonar
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingGoal(g);
+                          setIsConfirmingDeleteGoal(false);
+                        }}
+                        className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Editar"
+                      >
+                        <Pencil size={14} />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingGoal(g);
+                          setIsConfirmingDeleteGoal(true);
+                        }}
+                        className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="flex justify-between text-xs text-slate-400 mb-2">
+                      <span>
+                        {formatCurrency(g.currentAmount, currentUser.config.currency)}
+                      </span>
+                      <span>
+                        Meta: {formatCurrency(g.targetAmount, currentUser.config.currency)}
+                      </span>
+                    </div>
+
+                    <ProgressBar value={g.currentAmount} max={max} isGoal />
+                    <p className="text-[10px] text-slate-500 mt-2">
+                      Progreso: <span className="text-slate-300 font-bold">{pct.toFixed(0)}%</span>
+                    </p>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
+  const AlertsView = () => {
+    if (!currentUser) return null;
+    return (
+      <div className="space-y-4 pb-24">
+        <h1 className="text-2xl font-bold text-white">Alertas</h1>
+        <p className="text-slate-400 text-sm">
+          Aquí se mostrarán avisos por sobres excedidos, pagos fijos, etc.
+        </p>
+
+        <Card className="p-4">
+          <p className="text-slate-300 text-sm">Sin alertas por ahora.</p>
+        </Card>
+      </div>
+    );
+  };
+
+  const ReportsView = () => {
+    if (!currentUser) return null;
+
+    const expenses = currentUser.transactions.filter((t) => t.type === "expense");
+    const totalExpenses = expenses.reduce((s, t) => s + t.amount, 0);
+    const totalIncomeExtra = currentUser.transactions
+      .filter((t) => t.type === "income")
+      .reduce((s, t) => s + t.amount, 0);
+
+    return (
+      <div className="space-y-4 pb-24">
+        <h1 className="text-2xl font-bold text-white">Análisis</h1>
+        <p className="text-slate-400 text-sm">
+          Resumen rápido (pendiente de gráficas completas).
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Card className="p-4">
+            <p className="text-slate-400 text-xs">Gastos</p>
+            <p className="text-white font-bold">{formatCurrency(totalExpenses, currentUser.config.currency)}</p>
+          </Card>
+          <Card className="p-4">
+            <p className="text-slate-400 text-xs">Ingresos extra</p>
+            <p className="text-white font-bold">{formatCurrency(totalIncomeExtra, currentUser.config.currency)}</p>
+          </Card>
+        </div>
+
+        <Card className="p-4">
+          <p className="text-slate-300 text-sm">
+            Movimientos: <span className="text-white font-bold">{currentUser.transactions.length}</span>
+          </p>
+        </Card>
+      </div>
+    );
+  };
+
+  const SettingsView = () => {
+    if (!currentUser) return null;
+
+    return (
+      <div className="space-y-4 pb-24">
+        <h1 className="text-2xl font-bold text-white">Ajustes</h1>
+
+        <Card className="p-4 space-y-3">
+          <div>
+            <p className="text-slate-400 text-xs">Usuario</p>
+            <p className="text-white font-bold">{currentUser.config.name}</p>
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setView("dashboard")}>
+              Volver
+            </Button>
+            <Button variant="danger" className="flex-1" onClick={handleLogout}>
+              <LogOut size={18} /> Salir
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
+
+
+
   // (Para no hacer la respuesta infinita, mantuve Reports/Goals/Alerts/Settings igual a lo que ya traías,
   // pero tu build y modales de sobres/fijos ya quedan funcionando y TS pasa en CI.)
   // Si quieres, en el siguiente mensaje te pego Reports/Goals/Alerts/Settings completos también.
@@ -1733,7 +1935,10 @@ export default function FinanceApp() {
           {view === "dashboard" && <Dashboard />}
           {view === "budget" && <BudgetView />}
           {view === "recurring" && <RecurringView />}
-          {/* Si ya tenías Goals/Alerts/Reports/Settings en tu repo, déjalos como están */}
+          {view === "goals" && <GoalsView />}
+          {view === "alerts" && <AlertsView />}
+          {view === "reports" && <ReportsView />}
+          {view === "settings" && <SettingsView />}
         </main>
 
         <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 safe-area-bottom">
@@ -1788,6 +1993,117 @@ export default function FinanceApp() {
         {isModalOpen && <AddTransactionModal />}
         {isCategoryModalOpen && <AddCategoryModal />}
         {isRecurringModalOpen && <AddRecurringModal />}
+
+        {isGoalModalOpen && <AddGoalModal />}
+
+        {goalDepositId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+              <h2 className="text-lg font-bold text-white">Abonar a meta</h2>
+
+              <Input
+                autoFocus
+                inputMode="decimal"
+                placeholder="Monto ($)"
+                value={goalDepositAmount}
+                onKeyDown={preventInvalidNumberKeys}
+                onChange={(e) => setGoalDepositAmount(sanitizeAmount(e.target.value))}
+              />
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setGoalDepositId(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    const n = Number(goalDepositAmount);
+                    if (Number.isFinite(n) && n > 0) addGoalDeposit(goalDepositId, n);
+                  }}
+                >
+                  Abonar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editingGoal && !isConfirmingDeleteGoal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-white">Editar meta</h2>
+                <button onClick={() => setEditingGoal(null)} className="text-slate-400 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div>
+                <Label>Nombre</Label>
+                <Input
+                  value={editingGoal.name}
+                  onChange={(e) => setEditingGoal({ ...editingGoal, name: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <Label>Monto meta</Label>
+                <Input
+                  inputMode="decimal"
+                  value={String(editingGoal.targetAmount ?? "")}
+                  onKeyDown={preventInvalidNumberKeys}
+                  onChange={(e) =>
+                    setEditingGoal({ ...editingGoal, targetAmount: Number(sanitizeAmount(e.target.value)) })
+                  }
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setEditingGoal(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={() => editGoal(editingGoal.id, editingGoal.name.trim(), Number(editingGoal.targetAmount))}
+                >
+                  Guardar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editingGoal && isConfirmingDeleteGoal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl p-6 space-y-4">
+              <h2 className="text-lg font-bold text-white">¿Eliminar meta?</h2>
+              <p className="text-slate-400 text-sm">
+                Se eliminará <b className="text-white">{editingGoal.name}</b>. Esta acción no se puede deshacer.
+              </p>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => {
+                    setIsConfirmingDeleteGoal(false);
+                    setEditingGoal(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="danger"
+                  className="flex-1"
+                  onClick={() => deleteGoal(editingGoal.id)}
+                >
+                  Eliminar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* Modal Pago Parcial Gasto Fijo */}
         {payRecurringId && (
